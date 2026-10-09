@@ -78,6 +78,22 @@ async function copyText(text) {
   }
 }
 function whatsapp(text) { window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank'); }
+const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// "Get PDF": fills a print-only sheet and opens the print dialog (choose "Save as PDF").
+function printDoc(title, sub, bodyHtml) {
+  let sheet = $('#printSheet');
+  if (!sheet) { sheet = h('div', { class: 'print-sheet', id: 'printSheet' }); document.body.append(sheet); }
+  sheet.innerHTML = `<h2>${esc(title)}</h2><div class="psub">${esc(SHOP)} · ${esc(sub)}</div>${bodyHtml}`;
+  window.print();
+}
+
+// Illustrated header card at the top of each tab.
+function banner(key, title, line, figure) {
+  return h('section', { class: 'banner' },
+    h('div', { class: 'txt' }, h('h1', {}, title), h('p', {}, line), figure != null ? (figure instanceof Node ? figure : h('div', { class: 'figure' }, figure)) : null),
+    h('span', { html: ART[key] || '' }));
+}
 
 function dateNav(value, onChange, { step = 1, label } = {}) {
   const input = h('input', { type: 'date', value, 'aria-label': 'Pick a date', onChange: (e) => e.target.value && onChange(e.target.value) });
@@ -169,6 +185,7 @@ function renderSales(view) {
       onInput: (e) => { rec[key] = e.target.value; save(); },
     })));
 
+  view.append(banner('sales', 'Cash up', 'Enter the till report, count the cash, send it.'));
   view.append(dateNav(salesDate, (d) => { salesDate = d; show('sales'); }));
 
   // result card on top: the thing you look at
@@ -215,6 +232,16 @@ function renderSales(view) {
   view.append(h('div', { class: 'btn-row', style: 'margin-bottom:12px' },
     h('button', { class: 'btn whatsapp', onClick: () => whatsapp(salesText(salesDate, rec)) }, 'Send on WhatsApp'),
     h('button', { class: 'btn', onClick: () => copyText(salesText(salesDate, rec)) }, 'Copy'),
+    h('button', { class: 'btn', onClick: () => {
+      const c = calc(rec); const row = (l, v) => `<tr><td>${esc(l)}</td><td class="r">${money(v)}</td></tr>`;
+      let body = '<table><tbody>';
+      for (const g of SALES_GROUPS) for (const [k, label] of g.fields) body += row(label, num(rec[k]));
+      body += row('Total sales', c.total) + row('Cards & platforms', c.ded) + row('Expected cash', c.expected);
+      if (c.counted) body += row('Cash counted', num(rec.cash)) + row('Float kept', num(rec.float)) + row('Cash takings', c.takings);
+      body += '</tbody>' + (c.counted ? `<tfoot><tr><td>Difference (${c.status === 'ok' ? 'balanced' : c.status})</td><td class="r">${money(c.diff)}</td></tr></tfoot>` : '') + '</table>';
+      if (rec.note) body += `<p><b>Note:</b> ${esc(rec.note)}</p>`;
+      printDoc('Daily sales', fmtLong(salesDate), body);
+    } }, 'Get PDF'),
     h('button', { class: 'btn danger', onClick: () => { if (confirm(`Clear everything for ${fmtLong(salesDate)}?`)) { saveRec(salesDate, {}); show('sales'); toast('Day cleared'); } } }, 'Clear day')));
 
   // last 7 days
@@ -257,14 +284,14 @@ let stockWeek = weekStart(today());
 const stockForm = { type: 'in', date: today() };
 const getLedger = () => store.get('ledger', []);
 
-function renderStock(view) {
+function renderStock(view, embedded) {
   const ledger = getLedger();
   const end = addDays(stockWeek, 6);
   const week = ledger.filter((e) => e.date >= stockWeek && e.date <= end);
   const spend = week.filter((e) => e.type !== 'waste').reduce((s, e) => s + e.qty * e.price, 0);
   const waste = week.filter((e) => e.type === 'waste').reduce((s, e) => s + e.qty * e.price, 0);
 
-  view.append(dateNav(stockWeek, (d) => { stockWeek = weekStart(d); show('stock'); },
+  if (!embedded) view.append(dateNav(stockWeek, (d) => { stockWeek = weekStart(d); show(current); },
     { step: 7, label: (k) => `${fmtDay(k, { day: 'numeric', month: 'short' })} – ${fmtDay(addDays(k, 6), { day: 'numeric', month: 'short' })}` }));
 
   view.append(h('div', { class: 'stats' },
@@ -288,7 +315,7 @@ function renderStock(view) {
     const last = [...ledger].reverse().find((e) => e.item.toLowerCase() === f.item.value.trim().toLowerCase());
     if (last) { if (!f.price.value) f.price.value = last.price || ''; if (!f.supplier.value && last.supplier) f.supplier.value = last.supplier; updTotal(); }
   });
-  const segBtn = (val, label) => h('button', { type: 'button', 'aria-pressed': String(stockForm.type === val), onClick: () => { stockForm.type = val; show('stock'); } }, label);
+  const segBtn = (val, label) => h('button', { type: 'button', 'aria-pressed': String(stockForm.type === val), onClick: () => { stockForm.type = val; show(current); } }, label);
 
   function add() {
     const item = f.item.value.trim();
@@ -300,7 +327,8 @@ function renderStock(view) {
     store.set('ledger', all);
     stockWeek = weekStart(f.date.value || today());
     toast(stockForm.type === 'waste' ? 'Waste logged' : 'Delivery logged');
-    show('stock');
+    if (current === 'food') foodWeek = stockWeek;
+    show(current);
     $('#view input[list=itemlist]')?.focus();
   }
 
@@ -335,7 +363,7 @@ function renderStock(view) {
   // entries
   const list = h('div');
   const days = [...new Set(week.map((e) => e.date))].sort().reverse();
-  if (!days.length) list.append(h('div', { class: 'empty' }, 'Nothing logged this week. Add the first delivery above.'));
+  if (!days.length) list.append(h('div', { class: 'empty' }, 'Nothing itemised this week.'));
   for (const d of days) {
     list.append(h('div', { class: 'day-head' }, fmtLong(d)));
     list.append(h('ul', { class: 'list' }, week.filter((e) => e.date === d).map((e) => h('li', { class: 'li' },
@@ -345,7 +373,7 @@ function renderStock(view) {
       h('div', { class: 'amt' }, money(e.qty * e.price)),
       h('button', { class: 'x', 'aria-label': 'Delete ' + e.item, onClick: () => {
         if (!confirm(`Delete ${e.item} (${money(e.qty * e.price)})?`)) return;
-        store.set('ledger', getLedger().filter((x) => x.id !== e.id)); show('stock');
+        store.set('ledger', getLedger().filter((x) => x.id !== e.id)); show(current);
       } }, '×')))));
   }
   const weekText = () => {
@@ -364,35 +392,148 @@ function renderStock(view) {
       h('button', { class: 'btn', onClick: () => copyText(weekText()) }, 'Copy')) : null));
 }
 
+/* ================= FOOD SPEND (weekly docket) ================= */
+let foodWeek = weekStart(today());
+let itemLogOpen = false;
+const FOOD_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const getFood = () => store.get('food', {});
+const foodTotal = (arr) => (arr || []).reduce((s, v) => s + num(v), 0);
+const weekLabel = (k) => `Week of ${fmtDay(k, { weekday: 'short', day: 'numeric', month: 'short' })}`;
+
+function foodText(week, amounts) {
+  const lines = [`${SHOP} – Food spend`, weekLabel(week), ''];
+  FOOD_DAYS.forEach((d, i) => { if (num(amounts[i])) lines.push(`${fmtDay(addDays(week, i))}: ${money(num(amounts[i]))}`); });
+  lines.push('', `Total: ${money(foodTotal(amounts))}`);
+  return lines.join('\n');
+}
+
+function renderFood(view) {
+  const amounts = (getFood()[foodWeek] || ['', '', '', '', '', '']).slice();
+  const save = () => {
+    const all = getFood();
+    if (amounts.some((v) => String(v).trim() !== '')) all[foodWeek] = amounts; else delete all[foodWeek];
+    store.set('food', all);
+  };
+  const fig = h('div', { class: 'figure' });
+  view.append(banner('food', 'Food spend', 'Stock bought each day, one docket per week.', fig));
+  view.append(dateNav(foodWeek, (d) => { foodWeek = weekStart(d); show('food'); }, { step: 7, label: weekLabel }));
+
+  const totalEl = h('b');
+  const t = today();
+  const rows = FOOD_DAYS.map((d, i) => {
+    const key = addDays(foodWeek, i);
+    const input = h('input', { class: 'input', inputmode: 'decimal', placeholder: '0.00', value: amounts[i] || '', autocomplete: 'off', 'aria-label': `${d} spend`,
+      onInput: (e) => {
+        const v = e.target.value.replace(/[£\s]/g, '');
+        if (v !== '' && !/^\d*\.?\d{0,2}$/.test(v)) { e.target.value = amounts[i] || ''; return; }
+        amounts[i] = v; save(); upd();
+      } });
+    return h('div', { class: 'drow' + (key === t ? ' today' : '') },
+      h('div', { class: 'dday' }, h('b', {}, d), h('span', {}, fmtDay(key, { day: 'numeric', month: 'short' }))),
+      h('div', { class: 'money' }, input));
+  });
+  view.append(h('section', { class: 'card docket' }, h('h2', {}, 'This week\u2019s docket'), rows,
+    h('div', { class: 'docket-total' }, h('span', {}, 'Total this week'), totalEl)));
+
+  const lastWeekEl = h('div', { class: 'v' }); const deltaEl = h('div', { class: 'delta' });
+  const avgEl = h('div', { class: 'v' });
+  view.append(h('div', { class: 'stats' },
+    h('div', { class: 'stat' }, lastWeekEl, h('div', { class: 'k' }, 'Last week'), deltaEl),
+    h('div', { class: 'stat' }, avgEl, h('div', { class: 'k' }, 'Average per day'))));
+
+  const chartBox = h('div');
+  view.append(h('section', { class: 'card' }, h('h2', {}, 'Last 8 weeks', h('small', {}, 'tap a week to open it')), chartBox));
+
+  view.append(h('div', { class: 'btn-row', style: 'margin-bottom:12px' },
+    h('button', { class: 'btn primary', onClick: () => {
+      const rowsHtml = FOOD_DAYS.map((d, i) => `<tr><td>${esc(fmtLong(addDays(foodWeek, i)))}</td><td class="r">${money(num(amounts[i]))}</td></tr>`).join('');
+      printDoc('Stock food', weekLabel(foodWeek), `<table><thead><tr><th>Day</th><th class="r">Amount</th></tr></thead><tbody>${rowsHtml}</tbody><tfoot><tr><td>Total</td><td class="r">${money(foodTotal(amounts))}</td></tr></tfoot></table>`);
+    } }, 'Get PDF'),
+    h('button', { class: 'btn whatsapp', onClick: () => whatsapp(foodText(foodWeek, amounts)) }, 'Send on WhatsApp'),
+    h('button', { class: 'btn danger', onClick: () => {
+      if (!confirm(`Clear the docket for the ${weekLabel(foodWeek).toLowerCase()}?`)) return;
+      const all = getFood(); delete all[foodWeek]; store.set('food', all); show('food'); toast('Week cleared');
+    } }, 'Clear week')));
+
+  // optional itemised log (deliveries & waste), same week
+  const logBox = h('div', { style: 'margin-top:12px' });
+  stockWeek = foodWeek;
+  renderStock(logBox, true);
+  view.append(h('details', { class: 'card fold', open: itemLogOpen, onToggle: (e) => { itemLogOpen = e.target.open; } },
+    h('summary', {}, 'Item log \u2013 deliveries & waste'),
+    h('p', { class: 'hint', style: 'margin-top:4px' }, 'Optional. Log single items when you want to see what the money went on.'),
+    logBox));
+
+  function upd() {
+    const total = foodTotal(amounts);
+    totalEl.textContent = money(total); fig.textContent = money(total);
+    const last = foodTotal(getFood()[addDays(foodWeek, -7)]);
+    lastWeekEl.textContent = money(last);
+    if (last && total) {
+      const pct = Math.round(((total - last) / last) * 100);
+      deltaEl.className = 'delta ' + (pct > 0 ? 'up' : 'down');
+      deltaEl.textContent = pct === 0 ? 'Same as last week' : `This week ${pct > 0 ? '+' : ''}${pct}%`;
+    } else { deltaEl.textContent = ''; }
+    const filled = amounts.filter((v) => num(v) > 0).length;
+    avgEl.textContent = filled ? money(total / filled) : '\u2013';
+    const all = getFood(); const weeks = [];
+    for (let i = 7; i >= 0; i--) weeks.push(addDays(foodWeek, -7 * i));
+    const vals = weeks.map((k) => (k === foodWeek ? total : foodTotal(all[k])));
+    const max = Math.max(1, ...vals);
+    chartBox.replaceChildren(h('div', { class: 'week eight' }, weeks.map((k, i) => h('button', {
+      class: 'bar' + (k === foodWeek ? ' sel' : ''), 'aria-label': `${weekLabel(k)}: ${money(vals[i])}`,
+      onClick: () => { foodWeek = k; show('food'); },
+    },
+    h('span', { class: 'v' }, vals[i] ? '\u00a3' + Math.round(vals[i]) : ''),
+    h('div', { class: 'fill' + (vals[i] ? ' has' : ''), style: `height:${Math.max(4, (vals[i] / max) * 100)}px` }),
+    h('div', { class: 'd' }, fmtDay(k, { day: 'numeric', month: 'numeric' }).replace('/', '.'))))));
+  }
+  upd();
+}
+
 /* ================= SHIFT LEDGER ================= */
-let shiftWeek = weekStart(today());
 const getStaff = () => store.get('staff', []);
 const getShifts = () => store.get('shifts', []);
 const getOpen = () => store.get('open', {});
 const toMin = (t) => { const [a, b] = String(t || '0:0').split(':').map(Number); return a * 60 + (b || 0); };
 function shiftHours(s) {
+  if (!s.start || !s.end) return 0;
   let start = toMin(s.start), end = toMin(s.end);
   if (end <= start) end += 1440; // past midnight
   return Math.max(0, (end - start - num(s.brk)) / 60);
 }
 let shiftTimer;
 let staffOpen = null; // remembers if the Staff box is open
+let period = 'week'; let customFrom = ''; let customTo = '';
+const PERIODS = [['week', 'This week'], ['2weeks', 'Last 2 weeks'], ['month', 'This month'], ['custom', 'Custom']];
+function periodBounds() {
+  const t = today();
+  if (period === 'week') { const s = weekStart(t); return [s, addDays(s, 6)]; }
+  if (period === '2weeks') { const s = weekStart(addDays(t, -7)); return [s, addDays(s, 13)]; }
+  if (period === 'month') { const d = parseKey(t); return [dkey(new Date(d.getFullYear(), d.getMonth(), 1)), dkey(new Date(d.getFullYear(), d.getMonth() + 1, 0))]; }
+  const a = customFrom || t, b = customTo || t;
+  return a <= b ? [a, b] : [b, a];
+}
+function updateShift(id, patch) {
+  const all = getShifts(); const s = all.find((x) => x.id === id); if (!s) return;
+  Object.assign(s, patch); store.set('shifts', all); show('shifts');
+}
 
 function renderShifts(view) {
   const staff = getStaff(); const open = getOpen();
-  const end = addDays(shiftWeek, 6);
-  const shifts = getShifts().filter((s) => s.date >= shiftWeek && s.date <= end);
+  const onNow = staff.filter((p) => open[p.id]).length;
+  view.append(banner('shifts', 'Shifts', onNow ? `${onNow} on shift right now` : 'Clock in, clock out, see the hours and pay.'));
 
   // clock board
   const board = h('div', { class: 'staff-grid' });
-  if (!staff.length) board.append(h('div', { class: 'empty' }, 'Add your staff below, then tap Clock in when someone starts.'));
+  if (!staff.length) board.append(h('div', { class: 'empty' }, 'Add your staff at the bottom, then tap Clock in when someone starts.'));
   for (const p of staff) {
     const since = open[p.id] ? new Date(open[p.id]) : null;
     const meta = h('div', { class: 'meta' });
     const upd = () => {
       if (!since) { meta.textContent = 'Not on shift'; return; }
       const m = Math.floor((Date.now() - since) / 60000);
-      meta.textContent = `On shift since ${hhmm(since)} · ${Math.floor(m / 60)}h ${pad(m % 60)}m`;
+      meta.textContent = `On shift since ${hhmm(since)} \u00b7 ${Math.floor(m / 60)}h ${pad(m % 60)}m`;
     };
     upd(); meta.dataset.live = '1'; meta._upd = upd;
     board.append(h('div', { class: 'staff' + (since ? ' on' : '') },
@@ -411,16 +552,25 @@ function renderShifts(view) {
     const all = getShifts();
     all.push({ id: uid(), staffId: p.id, name: p.name, date: dkey(since), start: hhmm(since), end: hhmm(now), brk: 0 });
     delete o[p.id]; store.set('open', o); store.set('shifts', all);
-    toast(`${p.name} clocked out – ${hrs((now - since) / 3600000)}`);
+    toast(`${p.name} clocked out \u2013 ${hrs((now - since) / 3600000)}`);
     show('shifts');
   }
 
-  // week
-  view.append(dateNav(shiftWeek, (d) => { shiftWeek = weekStart(d); show('shifts'); },
-    { step: 7, label: (k) => `${fmtDay(k, { day: 'numeric', month: 'short' })} – ${fmtDay(addDays(k, 6), { day: 'numeric', month: 'short' })}` }));
+  // pay period
+  const [from, to] = periodBounds();
+  const shifts = getShifts().filter((s) => s.date >= from && s.date <= to);
+  const rangeText = `${fmtDay(from, { weekday: 'short', day: 'numeric', month: 'short' })} \u2013 ${fmtDay(to, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}`;
+  view.append(h('section', { class: 'card' }, h('h2', {}, 'Pay period'),
+    h('div', { class: 'chips' }, PERIODS.map(([key, label]) => h('button', { class: 'chip', 'aria-pressed': String(period === key), onClick: () => {
+      period = key; if (key === 'custom' && !customFrom) { customFrom = addDays(today(), -13); customTo = today(); } show('shifts');
+    } }, label))),
+    period === 'custom' ? h('div', { class: 'fields', style: 'margin-top:10px' },
+      h('label', { class: 'field' }, h('span', {}, 'From'), h('input', { class: 'input', type: 'date', value: customFrom, onChange: (e) => { customFrom = e.target.value; show('shifts'); } })),
+      h('label', { class: 'field' }, h('span', {}, 'To'), h('input', { class: 'input', type: 'date', value: customTo, onChange: (e) => { customTo = e.target.value; show('shifts'); } }))) : null,
+    h('p', { class: 'hint' }, rangeText)));
 
   const per = {};
-  for (const s of shifts) { const key = s.staffId || s.name; per[key] = per[key] || { name: s.name, h: 0, n: 0 }; per[key].h += shiftHours(s); per[key].n++; }
+  for (const s of shifts) { const key = s.staffId || s.name; per[key] = per[key] || { name: s.name, h: 0, n: 0, list: [] }; per[key].h += shiftHours(s); per[key].n++; per[key].list.push(s); }
   const rows = Object.entries(per).sort((a, b) => b[1].h - a[1].h);
   const totalH = rows.reduce((s, [, v]) => s + v.h, 0);
   const rateOf = (id) => num((staff.find((p) => p.id === id) || {}).rate);
@@ -428,14 +578,14 @@ function renderShifts(view) {
   const maxH = rows.length ? rows[0][1].h || 1 : 1;
 
   view.append(h('div', { class: 'stats' },
-    h('div', { class: 'stat' }, h('div', { class: 'v' }, hrs(totalH)), h('div', { class: 'k' }, 'Hours this week')),
-    h('div', { class: 'stat' }, h('div', { class: 'v' }, totalPay ? money(totalPay) : `${shifts.length}`), h('div', { class: 'k' }, totalPay ? 'Wages (where a rate is set)' : 'Shifts logged'))));
+    h('div', { class: 'stat' }, h('div', { class: 'v' }, hrs(totalH)), h('div', { class: 'k' }, 'Hours in period')),
+    h('div', { class: 'stat' }, h('div', { class: 'v' }, totalPay ? money(totalPay) : `${shifts.length}`), h('div', { class: 'k' }, totalPay ? 'Pay (where a rate is set)' : 'Shifts logged'))));
 
   if (rows.length) view.append(h('section', { class: 'card' }, h('h2', {}, 'Hours by person'),
     h('div', { class: 'hbars' }, rows.map(([id, v]) => h('div', { class: 'hb' },
-      h('div', { class: 'hb-top' }, h('span', {}, `${v.name} `, h('span', { class: 'muted' }, `· ${v.n} shift${v.n > 1 ? 's' : ''}`)),
-        h('b', {}, hrs(v.h), rateOf(id) ? ` · ${money(v.h * rateOf(id))}` : '')),
-      h('div', { class: 'track' }, h('div', { style: `width:${Math.max(3, (v.h / maxH) * 100)}%;background:var(--sage)` })))))));
+      h('div', { class: 'hb-top' }, h('span', {}, `${v.name} `, h('span', { class: 'muted' }, `\u00b7 ${v.n} shift${v.n > 1 ? 's' : ''}`)),
+        h('b', {}, hrs(v.h), rateOf(id) ? ` \u00b7 ${money(v.h * rateOf(id))}` : '')),
+      h('div', { class: 'track' }, h('div', { style: `width:${Math.max(3, (v.h / maxH) * 100)}%` })))))));
 
   // manual add
   const sf = {
@@ -445,59 +595,79 @@ function renderShifts(view) {
     end: h('input', { class: 'input', type: 'time', value: '23:00' }),
     brk: h('input', { class: 'input num-input', inputmode: 'numeric', placeholder: '0' }),
   };
-  view.append(h('details', { class: 'card' },
-    h('summary', { style: 'cursor:pointer;font-weight:600;min-height:28px' }, 'Add a shift by hand'),
+  view.append(h('details', { class: 'card fold' },
+    h('summary', {}, 'Add a shift for another day'),
     staff.length ? h('div', { style: 'margin-top:12px' },
       h('div', { class: 'fields' },
         h('label', { class: 'field' }, h('span', {}, 'Who'), sf.who),
         h('label', { class: 'field' }, h('span', {}, 'Date'), sf.date),
-        h('label', { class: 'field' }, h('span', {}, 'Start'), sf.start),
-        h('label', { class: 'field' }, h('span', {}, 'Finish'), sf.end),
+        h('label', { class: 'field' }, h('span', {}, 'Clock in'), sf.start),
+        h('label', { class: 'field' }, h('span', {}, 'Clock out'), sf.end),
         h('label', { class: 'field full' }, h('span', {}, 'Break (minutes)'), sf.brk)),
       h('button', { class: 'btn primary', style: 'width:100%;margin-top:12px', onClick: () => {
         const p = staff.find((x) => x.id === sf.who.value); if (!p || !sf.date.value) return;
         const all = getShifts();
         all.push({ id: uid(), staffId: p.id, name: p.name, date: sf.date.value, start: sf.start.value, end: sf.end.value, brk: num(sf.brk.value) });
-        store.set('shifts', all); shiftWeek = weekStart(sf.date.value); toast('Shift added'); show('shifts');
+        store.set('shifts', all); toast('Shift added'); show('shifts');
       } }, 'Add shift')) : h('p', { class: 'hint' }, 'Add staff first.')));
 
-  // shift list
+  // timesheet – tap a time to correct it
   const days = [...new Set(shifts.map((s) => s.date))].sort().reverse();
   const list = h('div');
-  if (!days.length) list.append(h('div', { class: 'empty' }, 'No shifts this week yet.'));
+  if (!days.length) list.append(h('div', { class: 'empty' }, h('span', { html: ART.hen.replace('class="hen"', 'width="56" height="56"') }), 'No shifts in this period yet.'));
   for (const d of days) {
     list.append(h('div', { class: 'day-head' }, fmtLong(d)));
     list.append(h('ul', { class: 'list' }, shifts.filter((s) => s.date === d).map((s) => h('li', { class: 'li' },
-      h('div', { class: 'main' }, h('div', { class: 'name' }, s.name), h('div', { class: 'meta' }, `${s.start} – ${s.end}${num(s.brk) ? ` · ${s.brk} min break` : ''}`)),
-      h('div', { class: 'amt' }, hrs(shiftHours(s))),
+      h('div', { class: 'main' }, h('div', { class: 'name' }, s.name),
+        h('div', { class: 'times' },
+          h('input', { type: 'time', value: s.start || '', 'aria-label': 'Clock in time', onChange: (e) => updateShift(s.id, { start: e.target.value }) }),
+          h('span', {}, '\u2013'),
+          h('input', { type: 'time', value: s.end || '', 'aria-label': 'Clock out time', onChange: (e) => updateShift(s.id, { end: e.target.value }) })),
+        num(s.brk) ? h('div', { class: 'meta' }, `${s.brk} min break`) : null),
+      h('div', { style: 'text-align:right' }, h('div', { class: 'amt' }, hrs(shiftHours(s))),
+        rateOf(s.staffId) ? h('div', { class: 'meta' }, money(shiftHours(s) * rateOf(s.staffId))) : null),
       h('button', { class: 'x', 'aria-label': 'Delete shift', onClick: () => {
         if (!confirm(`Delete ${s.name}'s shift on ${fmtDay(s.date)}?`)) return;
         store.set('shifts', getShifts().filter((x) => x.id !== s.id)); show('shifts');
-      } }, '×')))));
+      } }, '\u00d7')))));
   }
-  const weekText = () => {
-    const lines = [`${SHOP} – Shifts`, `Week of ${fmtLong(shiftWeek)}`, ''];
-    rows.forEach(([id, v]) => lines.push(`${v.name}: ${hrs(v.h)} (${v.n} shifts)${rateOf(id) ? ' – ' + money(v.h * rateOf(id)) : ''}`));
-    lines.push('', `Total: ${hrs(totalH)}`);
+  const periodText = () => {
+    const lines = [`${SHOP} \u2013 Shifts`, rangeText, ''];
+    rows.forEach(([id, v]) => lines.push(`${v.name}: ${hrs(v.h)} (${v.n} shifts)${rateOf(id) ? ' \u2013 ' + money(v.h * rateOf(id)) : ''}`));
+    lines.push('', `Total: ${hrs(totalH)}${totalPay ? ' \u2013 ' + money(totalPay) : ''}`);
     return lines.join('\n');
   };
-  view.append(h('section', { class: 'card' }, h('h2', {}, 'Shifts this week'), list,
+  const periodPdf = () => {
+    let body = '';
+    for (const [id, v] of rows) {
+      const rate = rateOf(id);
+      body += `<h3>${esc(v.name)}${rate ? ` \u2013 ${money(rate)}/h` : ''}</h3><table><thead><tr><th>Date</th><th>In</th><th>Out</th><th class="r">Break</th><th class="r">Hours</th>${rate ? '<th class="r">Pay</th>' : ''}</tr></thead><tbody>`;
+      [...v.list].sort((a, b) => (a.date + a.start < b.date + b.start ? -1 : 1)).forEach((s) => {
+        body += `<tr><td>${esc(fmtDay(s.date, { weekday: 'short', day: 'numeric', month: 'short' }))}</td><td>${esc(s.start)}</td><td>${esc(s.end)}</td><td class="r">${num(s.brk) ? s.brk + 'm' : ''}</td><td class="r">${hrs(shiftHours(s))}</td>${rate ? `<td class="r">${money(shiftHours(s) * rate)}</td>` : ''}</tr>`;
+      });
+      body += `</tbody><tfoot><tr><td colspan="4">Total</td><td class="r">${hrs(v.h)}</td>${rate ? `<td class="r">${money(v.h * rate)}</td>` : ''}</tr></tfoot></table>`;
+    }
+    body += `<h3>All staff: ${hrs(totalH)}${totalPay ? ' \u2013 ' + money(totalPay) : ''}</h3>`;
+    printDoc('Shift ledger', rangeText, body);
+  };
+  view.append(h('section', { class: 'card' }, h('h2', {}, 'Timesheet', h('small', {}, 'tap a time to correct it')), list,
     shifts.length ? h('div', { class: 'btn-row', style: 'margin-top:12px' },
-      h('button', { class: 'btn whatsapp', onClick: () => whatsapp(weekText()) }, 'Send on WhatsApp'),
-      h('button', { class: 'btn', onClick: () => copyText(weekText()) }, 'Copy')) : null));
+      h('button', { class: 'btn primary', onClick: periodPdf }, 'Get PDF'),
+      h('button', { class: 'btn whatsapp', onClick: () => whatsapp(periodText()) }, 'Send on WhatsApp'),
+      h('button', { class: 'btn', onClick: () => copyText(periodText()) }, 'Copy')) : null));
 
   // staff management
   const nm = h('input', { class: 'input', placeholder: 'Name' });
   const rt = h('input', { class: 'input', inputmode: 'decimal', placeholder: 'Optional' });
-  view.append(h('details', { class: 'card', open: staffOpen ?? !staff.length, onToggle: (e) => { staffOpen = e.target.open; } },
-    h('summary', { style: 'cursor:pointer;font-weight:600;min-height:28px' }, `Staff (${staff.length})`),
+  view.append(h('details', { class: 'card fold', open: staffOpen ?? !staff.length, onToggle: (e) => { staffOpen = e.target.open; } },
+    h('summary', {}, `Staff (${staff.length})`),
     h('ul', { class: 'list', style: 'margin-top:8px' }, staff.map((p) => h('li', { class: 'li' },
       h('div', { class: 'main' }, h('div', { class: 'name' }, p.name), h('div', { class: 'meta' }, p.rate ? `${money(num(p.rate))} an hour` : 'No rate set')),
       h('button', { class: 'x', 'aria-label': 'Remove ' + p.name, onClick: () => {
         if (!confirm(`Remove ${p.name}? Their past shifts stay in the ledger.`)) return;
         store.set('staff', getStaff().filter((x) => x.id !== p.id));
         const o = getOpen(); delete o[p.id]; store.set('open', o); show('shifts');
-      } }, '×')))),
+      } }, '\u00d7')))),
     h('div', { class: 'fields', style: 'margin-top:10px' },
       h('label', { class: 'field' }, h('span', {}, 'Name'), nm),
       h('label', { class: 'field' }, h('span', {}, 'Hourly rate'), h('div', { class: 'money' }, rt))),
@@ -534,6 +704,8 @@ function renderOrder(view) {
     class: 'input', type: 'search', placeholder: 'Search or type a new item…', value: orderQuery, autocomplete: 'off',
     onInput: (e) => { orderQuery = e.target.value; drawAdd(); drawList(); },
   });
+  const orderFig = h('div', { class: 'figure small' });
+  view.append(banner('order', 'Order pad', 'Tap what you need. New items stay on the list.', orderFig));
   view.append(
     h('div', { class: 'search' },
       h('div', { class: 'search-wrap' }, h('span', { html: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>' }), search)),
@@ -547,6 +719,7 @@ function renderOrder(view) {
     const b = getBasket();
     const lines = catalog.filter((i) => b[i.id] > 0);
     const count = lines.length;
+    orderFig.textContent = count ? `${count} item${count > 1 ? 's' : ''} in order` : '';
     let pill = $('#orderPill');
     if (count && !editMode) {
       if (!pill) { pill = h('button', { class: 'pill', id: 'orderPill', onClick: () => basketBox.scrollIntoView({ behavior: 'smooth' }) }); document.body.append(pill); }
@@ -738,7 +911,7 @@ function openSettings() {
       Object.keys(localStorage).filter((k) => k.startsWith('fc.')).forEach((k) => localStorage.removeItem(k));
       location.reload();
     } }, 'Delete all data'),
-    h('p', { class: 'hint', style: 'margin-top:16px' }, 'FC Daily v1'));
+    h('p', { class: 'hint', style: 'margin-top:16px' }, 'FC Daily v2'));
   dlg.showModal();
 }
 $('#settings').addEventListener('click', (e) => { if (e.target.id === 'settings') e.target.close(); });
@@ -747,20 +920,23 @@ $('#settingsBtn').addEventListener('click', openSettings);
 /* ================= TABS ================= */
 const ICONS = {
   sales: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M14.5 8.5c-.4-.9-1.2-1.4-2.3-1.4-1.6 0-2.4 1-2.4 2.3 0 1 .4 1.8.4 3 0 .8-.3 1.4-1.2 2.1h5.5M9 12h4"/></svg>',
-  stock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 8-9-5-9 5v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg>',
+  food: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11h16l-1.5 9h-13z"/><path d="M8 11c0-3 1.5-5 4-6M16 11c0-2-1-4-3-5"/><circle cx="12" cy="4" r="1.5"/></svg>',
   shifts: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
   order: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M9 10h6M9 14h6M9 18h3"/></svg>',
 };
 const TABS = [
   { key: 'sales', label: 'Daily sales', sub: 'Cash up the day', render: renderSales },
-  { key: 'stock', label: 'Stock', sub: 'Deliveries & waste ledger', render: renderStock },
+  { key: 'food', label: 'Food spend', sub: 'Weekly stock food docket', render: renderFood },
   { key: 'shifts', label: 'Shifts', sub: 'Clock in, hours ledger', render: renderShifts },
   { key: 'order', label: 'Order pad', sub: 'Build the supplier order', render: renderOrder },
 ];
 let current = store.get('tab', 'sales');
+if (current === 'stock') current = 'food';
 if (!TABS.some((t) => t.key === current)) current = 'sales';
 
-const tabsInner = h('div', { class: 'tabs-inner' }, TABS.map((t) => h('button', { class: 'tab', 'data-tab': t.key, onClick: () => show(t.key) }, h('span', { html: ICONS[t.key] }), t.label)));
+$('#henSlot').outerHTML = ART.hen;
+
+const tabsInner = h('div', { class: 'tabs-inner' }, TABS.map((t) => h('button', { class: 'tab', 'data-tab': t.key, onClick: () => show(t.key) }, h('span', { class: 'ic', html: ICONS[t.key] }), t.label)));
 $('#tabs').append(tabsInner);
 
 function show(key) {

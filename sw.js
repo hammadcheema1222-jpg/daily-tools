@@ -1,6 +1,6 @@
 // Offline support. Bump VERSION whenever you change any file so phones get the update.
-const VERSION = 'fc-daily-v1';
-const SHELL = ['./', './index.html', './app.js', './styles.css', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png'];
+const VERSION = 'fc-daily-v2';
+const SHELL = ['./', './index.html', './art.js', './app.js', './styles.css', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
