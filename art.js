@@ -1,88 +1,9 @@
-/* Hand-drawn style illustrations for Favorable Chicken – Daily tools.
-   Plain SVG strings so they work offline. Colours follow styles.css. */
 'use strict';
-const INK = '#21322C';
-const HILLS = `<path d="M0 120 C38 92 84 94 122 104 C160 114 188 98 220 90 V120Z" fill="#C6DCCE"/><path d="M0 120 C50 106 96 112 140 116 C176 119 200 110 220 108 V120Z" fill="#B3D0BF"/>`;
-const coin = (y) => `<path d="M138 ${y}v7a21 7 0 0 0 42 0v-7" fill="#D7A13A" stroke="${INK}" stroke-width="2"/><ellipse cx="159" cy="${y}" rx="21" ry="7" fill="#F2C766" stroke="${INK}" stroke-width="2"/>`;
-
+// Original SVG identity. Offline, scalable, no external artwork.
 const ART = {
-  hen: `<svg class="hen" viewBox="0 0 64 64" aria-hidden="true">
-    <circle cx="32" cy="32" r="31" fill="#DCEBE4"/>
-    <path d="M14 46h36" stroke="#B3D0BF" stroke-width="4" stroke-linecap="round"/>
-    <path d="M27 49v5M37 49v5" stroke="#D7A13A" stroke-width="2.5" stroke-linecap="round"/>
-    <ellipse cx="35" cy="38" rx="16" ry="12" fill="#FBFCF9" stroke="${INK}" stroke-width="2.2"/>
-    <path d="M49 34c5-3 7-8 5-12-3 3-6 5-9 6" fill="#FBFCF9" stroke="${INK}" stroke-width="2.2" stroke-linejoin="round"/>
-    <circle cx="24" cy="25" r="9" fill="#FBFCF9" stroke="${INK}" stroke-width="2.2"/>
-    <path d="M18 17c0-4 3-5 5-2 1-3 5-3 5 1 2-1 4 1 2 3" fill="#C9675F" stroke="${INK}" stroke-width="1.6" stroke-linejoin="round"/>
-    <path d="M15.5 25.5 10 27.5l5.5 2z" fill="#E7B44C" stroke="${INK}" stroke-width="1.4" stroke-linejoin="round"/>
-    <path d="M16.5 30.5c0 3 2 4 3 2" fill="#C9675F"/>
-    <circle cx="22" cy="23.5" r="1.7" fill="${INK}"/>
-    <path d="M30 39c4-5 11-5 14 0-4 2-10 2-14 0z" fill="#CFE2D6" stroke="${INK}" stroke-width="1.6" stroke-linejoin="round"/>
-  </svg>`,
-
-  sales: `<svg class="art" viewBox="0 0 220 120" aria-hidden="true">
-    <circle cx="196" cy="26" r="15" fill="#F6DFA0"/>
-    ${HILLS}
-    <g transform="rotate(-7 106 60)">
-      <path d="M82 14h50v80l-6.25-5-6.25 5-6.25-5-6.25 5-6.25-5-6.25 5-6.25-5-6.25 5z" fill="#fff" stroke="${INK}" stroke-width="2" stroke-linejoin="round"/>
-      <path d="M91 28h32M91 38h22M91 48h28M91 58h18" stroke="#A9C1B5" stroke-width="3" stroke-linecap="round"/>
-      <path d="M91 72h12M111 72h12" stroke="#3F7566" stroke-width="3.2" stroke-linecap="round"/>
-    </g>
-    ${coin(100)}${coin(91)}${coin(82)}
-    <path d="M196 106c-2-10 2-18 10-22-1 9-4 16-10 22zM196 106c-6-6-14-7-20-4 6 5 13 6 20 4z" fill="#7FAE92" stroke="${INK}" stroke-width="1.6" stroke-linejoin="round"/>
-  </svg>`,
-
-  food: `<svg class="art" viewBox="0 0 220 120" aria-hidden="true">
-    <circle cx="200" cy="22" r="13" fill="#F6DFA0"/>
-    ${HILLS}
-    <circle cx="116" cy="62" r="13" fill="#8DBE98" stroke="${INK}" stroke-width="2"/>
-    <circle cx="104" cy="58" r="10" fill="#A4CDA9" stroke="${INK}" stroke-width="2"/>
-    <path d="M108 62c4-4 9-5 13-3" stroke="${INK}" stroke-width="1.6" fill="none" stroke-linecap="round"/>
-    <path d="M128 64a17 13 0 0 1 34 0z" fill="#EBC170" stroke="${INK}" stroke-width="2" stroke-linejoin="round"/>
-    <path d="M137 56l2-1M146 53l2 0M154 56l2 1" stroke="#FBF4DF" stroke-width="2" stroke-linecap="round"/>
-    <circle cx="178" cy="60" r="11" fill="#D9786D" stroke="${INK}" stroke-width="2"/>
-    <path d="M173 50c3 1 7 1 10-1-1 3-4 4-5 4" fill="#7FAE92" stroke="${INK}" stroke-width="1.4" stroke-linejoin="round"/>
-    <rect x="92" y="66" width="104" height="44" rx="5" fill="#DDBE8E" stroke="${INK}" stroke-width="2"/>
-    <path d="M92 81h104M92 95h104" stroke="#B8955F" stroke-width="2"/>
-    <path d="M104 66v44M184 66v44" stroke="${INK}" stroke-width="2"/>
-    <path d="M60 110c-2-12 3-22 13-27-1 11-5 20-13 27z" fill="#7FAE92" stroke="${INK}" stroke-width="1.6" stroke-linejoin="round"/>
-  </svg>`,
-
-  shifts: `<svg class="art" viewBox="0 0 220 120" aria-hidden="true">
-    <circle cx="96" cy="26" r="12" fill="#F6DFA0"/>
-    <path d="M206 16a13 13 0 1 0 6 22 11 11 0 1 1-6-22z" fill="#C5DAE2" stroke="${INK}" stroke-width="1.6" stroke-linejoin="round"/>
-    <circle cx="190" cy="48" r="1.8" fill="#9DBFCB"/><circle cx="178" cy="26" r="1.4" fill="#9DBFCB"/>
-    ${HILLS}
-    <circle cx="150" cy="66" r="36" fill="#fff" stroke="${INK}" stroke-width="2.4"/>
-    <circle cx="150" cy="66" r="29" fill="none" stroke="#DCEBE4" stroke-width="6"/>
-    <g stroke="${INK}" stroke-width="2.4" stroke-linecap="round">
-      <path d="M150 36v5M150 91v5M120 66h5M175 66h5"/>
-      <path d="M150 66V48M150 66l12 8" stroke="#3F7566" stroke-width="3.2"/>
-    </g>
-    <circle cx="150" cy="66" r="3.4" fill="${INK}"/>
-    <path d="M128 31l-6-6M172 31l6-6" stroke="${INK}" stroke-width="2.4" stroke-linecap="round"/>
-  </svg>`,
-
-  order: `<svg class="art" viewBox="0 0 220 120" aria-hidden="true">
-    <circle cx="202" cy="20" r="12" fill="#F6DFA0"/>
-    ${HILLS}
-    <g transform="rotate(5 132 60)">
-      <rect x="100" y="16" width="62" height="86" rx="7" fill="#fff" stroke="${INK}" stroke-width="2"/>
-      <rect x="118" y="10" width="26" height="12" rx="4" fill="#3F7566" stroke="${INK}" stroke-width="2"/>
-      <g stroke-linecap="round" stroke-linejoin="round">
-        <rect x="109" y="34" width="9" height="9" rx="2" fill="#DCEBE4" stroke="${INK}" stroke-width="1.6"/>
-        <path d="M111 38l2 2 4-5" stroke="#3F7566" stroke-width="2.2" fill="none"/>
-        <path d="M124 38.5h28" stroke="#A9C1B5" stroke-width="3"/>
-        <rect x="109" y="52" width="9" height="9" rx="2" fill="#DCEBE4" stroke="${INK}" stroke-width="1.6"/>
-        <path d="M111 56l2 2 4-5" stroke="#3F7566" stroke-width="2.2" fill="none"/>
-        <path d="M124 56.5h22" stroke="#A9C1B5" stroke-width="3"/>
-        <rect x="109" y="70" width="9" height="9" rx="2" fill="#fff" stroke="${INK}" stroke-width="1.6"/>
-        <path d="M124 74.5h26" stroke="#A9C1B5" stroke-width="3"/>
-      </g>
-    </g>
-    <path d="M172 82a17 17 0 0 1 34 0" fill="none" stroke="${INK}" stroke-width="2.2"/>
-    <rect x="186" y="66" width="8" height="20" rx="3" fill="#9DBFCB" stroke="${INK}" stroke-width="1.6"/>
-    <path d="M166 82h46l-6 26h-34z" fill="#DDBE8E" stroke="${INK}" stroke-width="2" stroke-linejoin="round"/>
-    <path d="M170 92h38M172 100h34" stroke="#B8955F" stroke-width="2"/>
-  </svg>`,
+ hen: `<svg class="hen" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="1" y="1" width="62" height="62" rx="19" fill="#244F3C"/><path d="M44 27c8-5 9-10 9-10v20c0 12-10 18-22 18S12 46 12 37c0-6 3-9 7-11v-6c0-6 4-10 10-10s10 4 10 10v7z" fill="#F8F4E7"/><path d="M23 12c-3-6 2-10 6-6 3-5 8-2 7 3" fill="#D3AB62"/><path d="m18 24-8 4 8 4" fill="#D3AB62"/><circle cx="29" cy="21" r="2.4" fill="#244F3C"/><path d="M28 37c4-6 12-6 16-1-2 8-11 12-17 8" fill="#B7C99D"/><path d="M26 53v5m12-5v5" stroke="#D3AB62" stroke-width="3" stroke-linecap="round"/></svg>`,
+ sales: `<svg class="art" viewBox="0 0 230 190" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="115" cy="94" r="66" fill="#D5DFC9"/><path d="M30 172h169" stroke="#B2C19F" stroke-width="2"/><circle cx="186" cy="43" r="13" fill="#D5B16C"/><path d="M28 59h14m-7-7v14" stroke="#AABB96" stroke-width="2" stroke-linecap="round"/><g transform="rotate(-9 100 93)"><path d="M67 29h71v131l-9-6-9 6-9-6-9 6-9-6-9 6-9-6-8 6z" fill="#FFFDF7" stroke="#385D48" stroke-width="2.5"/><path d="M82 48h42m-42 12h29m-29 17h42m-42 12h34m-34 16h42" stroke="#B6C5A5" stroke-width="3" stroke-linecap="round"/><path d="M82 127h15m10 0h17" stroke="#385D48" stroke-width="4" stroke-linecap="round"/></g><g fill="#D5B16C" stroke="#82672D" stroke-width="2"><rect x="150" y="133" width="42" height="10" rx="5"/><rect x="150" y="143" width="42" height="10" rx="5"/><rect x="150" y="153" width="42" height="10" rx="5"/></g></svg>`,
+ food: `<svg class="art" viewBox="0 0 230 190" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="115" cy="94" r="66" fill="#D5DFC9"/><path d="M30 172h169" stroke="#B2C19F" stroke-width="2"/><circle cx="186" cy="43" r="13" fill="#D5B16C"/><path d="M28 59h14m-7-7v14" stroke="#AABB96" stroke-width="2" stroke-linecap="round"/><path d="m104 80 13-35 18 1 5 34" fill="#F2EFE1" stroke="#385D48" stroke-width="2.5"/><path d="M121 33h12v13h-12z" fill="#AABC94"/><path d="M71 104c-20-12-18-42 4-46 14-4 26 11 29 27" fill="#A6BD8B" stroke="#385D48" stroke-width="2.5"/><path d="m77 97-7-29m3 15 15-7" stroke="#385D48" stroke-width="2" fill="none"/><path d="M143 103c-7-19 9-31 20-31 19 0 28 19 17 33" fill="#C8836A" stroke="#385D48" stroke-width="2.5"/><path d="m162 73 6-11m-6 10-9-7" stroke="#385D48" stroke-width="2.5" stroke-linecap="round"/><path d="M50 98h143l-12 61H62z" fill="#D9BD87" stroke="#385D48" stroke-width="2.5"/><path d="M57 120h131m-126 20h123M81 100l6 57m75-57-6 57" stroke="#9A8050" stroke-width="2"/><path d="M97 110h48v19H97z" fill="#F9F5E7"/><path d="M109 119h24" stroke="#385D48" stroke-width="2.5" stroke-linecap="round"/></svg>`,
+ shifts: `<svg class="art" viewBox="0 0 230 190" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="115" cy="94" r="66" fill="#D5DFC9"/><path d="M30 172h169" stroke="#B2C19F" stroke-width="2"/><circle cx="186" cy="43" r="13" fill="#D5B16C"/><path d="M28 59h14m-7-7v14" stroke="#AABB96" stroke-width="2" stroke-linecap="round"/><path d="M174 29a17 17 0 1 0 17 22c-14 2-21-7-17-22z" fill="#B1C4BE"/><circle cx="117" cy="100" r="59" fill="#FFFDF7" stroke="#385D48" stroke-width="3"/><circle cx="117" cy="100" r="49" fill="#ECF0E2"/><path d="M117 53v9m0 76v9m-47-47h9m76 0h9" stroke="#A9BB96" stroke-width="3" stroke-linecap="round"/><path d="M117 100V75m0 25 24 17" stroke="#385D48" stroke-width="5" stroke-linecap="round"/><circle cx="117" cy="100" r="5" fill="#D0A962"/><path d="m79 152-6 11m82-11 6 11" stroke="#385D48" stroke-width="3" stroke-linecap="round"/></svg>`,
+ order: `<svg class="art" viewBox="0 0 230 190" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="115" cy="94" r="66" fill="#D5DFC9"/><path d="M30 172h169" stroke="#B2C19F" stroke-width="2"/><circle cx="186" cy="43" r="13" fill="#D5B16C"/><path d="M28 59h14m-7-7v14" stroke="#AABB96" stroke-width="2" stroke-linecap="round"/><g transform="rotate(6 105 94)"><rect x="65" y="35" width="83" height="129" rx="11" fill="#FFFDF7" stroke="#385D48" stroke-width="2.5"/><rect x="89" y="26" width="34" height="20" rx="6" fill="#385D48"/><g fill="#DEE8D1" stroke="#385D48" stroke-width="2"><rect x="79" y="64" width="14" height="14" rx="3"/><rect x="79" y="94" width="14" height="14" rx="3"/><rect x="79" y="124" width="14" height="14" rx="3"/></g><path d="m82 69 3 4 7-9m-10 35 3 4 7-9" stroke="#385D48" stroke-width="2.5" fill="none"/><path d="M103 71h30m-30 30h24m-24 30h28" stroke="#B1C39F" stroke-width="3" stroke-linecap="round"/></g><path d="M152 134h47l-5 35h-38z" fill="#D9BD87" stroke="#385D48" stroke-width="2.5"/><path d="M159 134v-10a17 17 0 0 1 34 0v10" fill="none" stroke="#385D48" stroke-width="2.5"/><path d="M164 148h24m-22 10h20" stroke="#9A8050" stroke-width="2"/></svg>`,
 };

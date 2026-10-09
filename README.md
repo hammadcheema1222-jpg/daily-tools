@@ -2,6 +2,14 @@
 
 A simple phone app for the shop. No password, no server, works offline.
 
+## Design & PDF edition
+
+Original chicken emblem and four matching vector illustrations; ivory, forest and brass palette; clearer typography, touch targets and keyboard focus states.
+
+**Download PDF** now generates a branded A4 report directly on the device for cash-up, food spend, shifts and supplier orders. Reports have aligned amounts, highlighted totals, repeated table headers and page numbers. No report data is sent to a server. The bundled `pdf-lib.min.js` is MIT licensed (see `pdf-lib-LICENSE.md`). If a staff name contains characters unsupported by the built-in PDF fonts, the matching browser print layout opens instead; choose Save as PDF.
+
+Your existing `fc.*` browser records and backup format are unchanged. Online assets are refreshed; the saved shell is still used offline. After deploying, open online and reopen the app to pick up the new cache.
+
 | Tab | What it does |
 |---|---|
 | **Daily sales** | Cash-up: Front + Delivery, minus Just Eat / Uber / Deliveroo / Delivery Drop / P.out / Dojo / Teya = expected cash. Count the till (or count notes & coins), take off the float, and see if you're balanced, over or short. Last-7-days chart. Send to WhatsApp or get a PDF. |
@@ -24,3 +32,4 @@ Edit files straight on GitHub – GitHub Pages updates in about a minute.
 - Sales fields: `SALES_GROUPS` in `app.js`.
 - Colours: top of `styles.css`. Illustrations: `art.js`.
 - **After any change, bump `VERSION` in `sw.js`** (e.g. `fc-daily-v3`) so phones pick up the update.
+

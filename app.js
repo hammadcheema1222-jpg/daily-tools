@@ -80,12 +80,21 @@ async function copyText(text) {
 function whatsapp(text) { window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank'); }
 const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-// "Get PDF": fills a print-only sheet and opens the print dialog (choose "Save as PDF").
-function printDoc(title, sub, bodyHtml) {
+// Downloads are generated locally. The print sheet is also a fallback for unsupported fonts.
+async function printDoc(title, sub, bodyHtml) {
   let sheet = $('#printSheet');
   if (!sheet) { sheet = h('div', { class: 'print-sheet', id: 'printSheet' }); document.body.append(sheet); }
-  sheet.innerHTML = `<h2>${esc(title)}</h2><div class="psub">${esc(SHOP)} · ${esc(sub)}</div>${bodyHtml}`;
-  window.print();
+  sheet.innerHTML = `<header class="report-brand">${ART.hen}<div><b>${esc(SHOP)}</b><span>DAILY TOOLS / SHOP RECORDS</span></div></header><h2>${esc(title)}</h2><div class="psub">${esc(sub)}</div>${bodyHtml}<footer class="report-footer">Generated on this device · ${esc(fmtLong(today()))}</footer>`;
+  try {
+    if (!window.DailyPDF) throw new Error('PDF renderer unavailable');
+    toast('Preparing PDF…');
+    await window.DailyPDF.download(title, sub, bodyHtml, SHOP);
+    toast('PDF downloaded');
+  } catch (error) {
+    console.warn('Direct PDF unavailable; opening print fallback', error);
+    toast('Choose Save as PDF in the print dialog');
+    window.print();
+  }
 }
 
 // Illustrated header card at the top of each tab.
@@ -241,7 +250,7 @@ function renderSales(view) {
       body += '</tbody>' + (c.counted ? `<tfoot><tr><td>Difference (${c.status === 'ok' ? 'balanced' : c.status})</td><td class="r">${money(c.diff)}</td></tr></tfoot>` : '') + '</table>';
       if (rec.note) body += `<p><b>Note:</b> ${esc(rec.note)}</p>`;
       printDoc('Daily sales', fmtLong(salesDate), body);
-    } }, 'Get PDF'),
+    } }, 'Download PDF'),
     h('button', { class: 'btn danger', onClick: () => { if (confirm(`Clear everything for ${fmtLong(salesDate)}?`)) { saveRec(salesDate, {}); show('sales'); toast('Day cleared'); } } }, 'Clear day')));
 
   // last 7 days
@@ -448,7 +457,7 @@ function renderFood(view) {
     h('button', { class: 'btn primary', onClick: () => {
       const rowsHtml = FOOD_DAYS.map((d, i) => `<tr><td>${esc(fmtLong(addDays(foodWeek, i)))}</td><td class="r">${money(num(amounts[i]))}</td></tr>`).join('');
       printDoc('Stock food', weekLabel(foodWeek), `<table><thead><tr><th>Day</th><th class="r">Amount</th></tr></thead><tbody>${rowsHtml}</tbody><tfoot><tr><td>Total</td><td class="r">${money(foodTotal(amounts))}</td></tr></tfoot></table>`);
-    } }, 'Get PDF'),
+    } }, 'Download PDF'),
     h('button', { class: 'btn whatsapp', onClick: () => whatsapp(foodText(foodWeek, amounts)) }, 'Send on WhatsApp'),
     h('button', { class: 'btn danger', onClick: () => {
       if (!confirm(`Clear the docket for the ${weekLabel(foodWeek).toLowerCase()}?`)) return;
@@ -652,7 +661,7 @@ function renderShifts(view) {
   };
   view.append(h('section', { class: 'card' }, h('h2', {}, 'Timesheet', h('small', {}, 'tap a time to correct it')), list,
     shifts.length ? h('div', { class: 'btn-row', style: 'margin-top:12px' },
-      h('button', { class: 'btn primary', onClick: periodPdf }, 'Get PDF'),
+      h('button', { class: 'btn primary', onClick: periodPdf }, 'Download PDF'),
       h('button', { class: 'btn whatsapp', onClick: () => whatsapp(periodText()) }, 'Send on WhatsApp'),
       h('button', { class: 'btn', onClick: () => copyText(periodText()) }, 'Copy')) : null));
 
@@ -748,7 +757,18 @@ function renderOrder(view) {
         h('button', { class: 'x', 'aria-label': 'Take off order', onClick: () => bump(i, -b[i.id]) }, '×')))),
       h('div', { class: 'btn-row', style: 'margin-top:12px' },
         h('button', { class: 'btn whatsapp', onClick: () => whatsapp(orderText(getBasket())) }, 'Send on WhatsApp'),
-        h('button', { class: 'btn', onClick: () => copyText(orderText(getBasket())) }, 'Copy')),
+        h('button', { class: 'btn', onClick: () => copyText(orderText(getBasket())) }, 'Copy'),
+        h('button', { class: 'btn', onClick: () => {
+          const b = getBasket(); let body = '';
+          for (const sec of sections()) {
+            const items = catalog.filter((i) => i.section === sec && b[i.id] > 0);
+            if (!items.length) continue;
+            body += `<h3>${esc(sec)}</h3><table><thead><tr><th>Item</th><th class="r">Quantity</th></tr></thead><tbody>`;
+            body += items.map((i) => `<tr><td>${esc(i.name)}</td><td class="r">${num(b[i.id])}</td></tr>`).join('');
+            body += '</tbody></table>';
+          }
+          printDoc('Supplier order', fmtLong(today()), body);
+        } }, 'Download PDF')),
       h('div', { class: 'btn-row', style: 'margin-top:8px' },
         h('button', { class: 'btn primary', onClick: () => {
           const bb = getBasket(); const hist = store.get('orderHistory', []);
@@ -911,7 +931,7 @@ function openSettings() {
       Object.keys(localStorage).filter((k) => k.startsWith('fc.')).forEach((k) => localStorage.removeItem(k));
       location.reload();
     } }, 'Delete all data'),
-    h('p', { class: 'hint', style: 'margin-top:16px' }, 'FC Daily v2'));
+    h('p', { class: 'hint', style: 'margin-top:16px' }, 'Daily Tools · Design & PDF edition'));
   dlg.showModal();
 }
 $('#settings').addEventListener('click', (e) => { if (e.target.id === 'settings') e.target.close(); });
@@ -959,3 +979,4 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 navigator.storage?.persist?.().catch(() => {});
+
