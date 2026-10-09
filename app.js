@@ -1,0 +1,785 @@
+/* Favorable Chicken – Daily tools
+   No login, no server. Everything is saved on this device (localStorage)
+   and the app works offline once it has been opened once.
+   Use Settings > Download backup to move data to another phone. */
+'use strict';
+
+const SHOP = 'Favorable Chicken';
+
+/* ================= tiny helpers ================= */
+const $ = (s, r = document) => r.querySelector(s);
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
+    else if (k === 'class') el.className = v;
+    else if (k === 'html') el.innerHTML = v;
+    else if (k === 'value') el.value = v;
+    else if (v === true) el.setAttribute(k, '');
+    else el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat(Infinity)) {
+    if (kid == null || kid === false) continue;
+    el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+  }
+  return el;
+}
+
+const store = {
+  get(key, fallback) {
+    try { const v = localStorage.getItem('fc.' + key); return v == null ? fallback : JSON.parse(v); }
+    catch { return fallback; }
+  },
+  set(key, value) {
+    try { localStorage.setItem('fc.' + key, JSON.stringify(value)); return true; }
+    catch { toast('Could not save – phone storage is full'); return false; }
+  },
+};
+
+let toastTimer;
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+/* dates – always local time (the old app used UTC, which broke after midnight in summer) */
+const pad = (n) => String(n).padStart(2, '0');
+const dkey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const today = () => dkey(new Date());
+const parseKey = (k) => { const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d); };
+const addDays = (k, n) => { const d = parseKey(k); d.setDate(d.getDate() + n); return dkey(d); };
+const weekStart = (k) => { const d = parseKey(k); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return dkey(d); };
+const fmtDay = (k, o = { weekday: 'short', day: 'numeric', month: 'short' }) => parseKey(k).toLocaleDateString('en-GB', o);
+const fmtLong = (k) => fmtDay(k, { weekday: 'long', day: 'numeric', month: 'long' });
+const hhmm = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+function relDay(k) {
+  const t = today();
+  if (k === t) return 'Today';
+  if (k === addDays(t, -1)) return 'Yesterday';
+  if (k === addDays(t, 1)) return 'Tomorrow';
+  return fmtDay(k, { year: 'numeric' }).split(' ').pop();
+}
+
+const num = (v) => { const n = parseFloat(String(v ?? '').replace(/[£,\s]/g, '')); return Number.isFinite(n) ? n : 0; };
+const money = (n) => (n < -0.004 ? '−' : '') + '£' + Math.abs(n).toFixed(2);
+const round2 = (n) => Math.round(n * 100) / 100;
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const hrs = (n) => (Math.round(n * 100) / 100).toString().replace(/\.0+$/, '') + 'h';
+
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); toast('Copied'); }
+  catch {
+    const ta = h('textarea', { style: 'position:fixed;opacity:0' }, text);
+    document.body.append(ta); ta.select();
+    try { document.execCommand('copy'); toast('Copied'); } catch { toast('Copy failed – long-press to copy instead'); }
+    ta.remove();
+  }
+}
+function whatsapp(text) { window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank'); }
+
+function dateNav(value, onChange, { step = 1, label } = {}) {
+  const input = h('input', { type: 'date', value, 'aria-label': 'Pick a date', onChange: (e) => e.target.value && onChange(e.target.value) });
+  return h('div', { class: 'datenav' },
+    h('button', { class: 'btn', 'aria-label': 'Previous', onClick: () => onChange(addDays(value, -step)) }, '‹'),
+    h('div', { class: 'datenav-mid' },
+      h('div', { class: 'when' }, label ? label(value) : fmtLong(value)),
+      h('div', { class: 'rel' }, step === 7 ? 'Tap to pick a week' : relDay(value)),
+      input),
+    h('button', { class: 'btn', 'aria-label': 'Next', onClick: () => onChange(addDays(value, step)) }, '›'));
+}
+
+/* ================= item list (shared by Order pad + Stock) ================= */
+const DEFAULT_ITEMS = {
+  'Drinks': ['Pepsi can', '7UP can', 'Coca-Cola can', 'Mirinda Orange can', 'Dr Pepper can', 'Mirinda Strawberry can', 'Water', 'Pepsi bottle', 'Diet Pepsi bottle', '7UP bottle', 'Tango Orange bottle', 'Fruit Shoot Orange', 'Fruit Shoot Blackcurrant'],
+  'Sauce bottles': ['Ketchup Bottle', 'Mayonnaise Bottle', 'Chili Sauce', 'Burger Sauce', 'BBQ Sauce', 'Peri Sauce'],
+  'Sauce cups': ['1 oz Sauce Cup', '4 oz Sauce Cup'],
+  'Boxes': ['Small Burger Box', 'Large Burger Box', 'FC1 Box', 'FC3 Box', 'FC4 Box'],
+  'Chips bags': ['Chips Bags (Small)', 'Chips Bags (Medium)', 'Chips Bags (Large)'],
+  'Delivery & packaging': ['White Bags for Customers', 'Delivery Bags / Tags'],
+  'Cold room': ['Raw Chicken (Whole)', 'Raw Wings (kg)', 'Qualiko burger fillet', 'Inner Fillet', '9 Cut Chicken', '4 Cut Chicken', '4" Burger Buns', '5" Burger Buns', 'Burger Cheese', 'Pizza Cheese', 'Tortilla Wraps', 'Lettuce', 'Onions', 'Peppers', 'Jalapenos', 'Olives', 'Sweet Corn', 'Mushrooms', 'Pineapple', 'Pepperoni', 'Lemon Dressing'],
+  'Pizza & boxes': ['7" Pizza Box', '9" Pizza Box', '12" Pizza Box', 'Foil Paper for wraps', 'Foil bags for peri peri', 'Oil Base for Pans', 'Lining papers'],
+  'Frozen': ['Chips (Bags)', 'Beef Burger', 'Fish Burger', 'Veggie Burger', 'Hash Brown', 'Onion Rings', 'Donuts', 'Apple Pie', 'Pizza Chicken', 'Pizza Beef', 'Nuggets', 'Chicken Steak Burger'],
+  'Miscellaneous': ['Henny Penny Filter Paper', 'Salt', 'Pepper', 'Veggie Oil', 'Peri Salt', 'Bin Bags', 'Customer Tissues', 'Blue Roll', 'Cleaning Liquids', 'Cleaning Sprays'],
+};
+function defaultCatalog() {
+  const out = []; let i = 0;
+  for (const [section, names] of Object.entries(DEFAULT_ITEMS))
+    for (const name of names) out.push({ id: 'd' + (i++), section, name, usual: name.startsWith('Chips Bags') ? 5 : 1 });
+  return out;
+}
+let catalog = store.get('catalog', null);
+if (!Array.isArray(catalog)) { catalog = defaultCatalog(); store.set('catalog', catalog); }
+const saveCatalog = () => store.set('catalog', catalog);
+const sections = () => [...new Set(catalog.map((i) => i.section))];
+
+/* ================= DAILY SALES ================= */
+const SALES_GROUPS = [
+  { title: 'Sales', hint: 'From the till report', fields: [['front', 'Front'], ['delivery', 'Delivery']] },
+  { title: 'Delivery platforms', fields: [['jeat', 'Just Eat'], ['uber', 'Uber Eats'], ['delivero', 'Deliveroo'], ['deliveryDrop', 'Delivery Drop'], ['pout', 'P.out']] },
+  { title: 'Card machines', fields: [['dojo', 'Dojo'], ['teya', 'Teya']] },
+];
+const DEDUCT = ['jeat', 'uber', 'delivero', 'deliveryDrop', 'pout', 'dojo', 'teya'];
+const DENOMS = [[50, '£50'], [20, '£20'], [10, '£10'], [5, '£5'], [2, '£2'], [1, '£1'], [0.5, '50p'], [0.2, '20p'], [0.1, '10p'], [0.05, '5p'], [0.02, '2p'], [0.01, '1p']];
+let salesDate = today();
+
+const allSales = () => store.get('sales', {});
+function getRec(date) {
+  const r = allSales()[date];
+  return r ? { ...r } : { float: store.get('settings', {}).float ?? '' };
+}
+function saveRec(date, rec) {
+  const all = allSales();
+  const hasData = Object.entries(rec).some(([k, v]) => k !== 'float' && k !== 'denoms' && String(v ?? '').trim() !== '');
+  if (hasData) all[date] = rec; else delete all[date];
+  store.set('sales', all);
+}
+function calc(r) {
+  const total = num(r.front) + num(r.delivery);
+  const ded = DEDUCT.reduce((s, k) => s + num(r[k]), 0);
+  const expected = total - ded;
+  const counted = String(r.cash ?? '').trim() !== '';
+  const takings = num(r.cash) - num(r.float);
+  const diff = round2(takings - expected);
+  const status = !counted ? 'none' : Math.abs(diff) < 0.5 ? 'ok' : diff > 0 ? 'over' : 'short';
+  return { total, ded, expected, counted, takings, diff, status };
+}
+const VERDICT = { none: 'Count the cash to see the difference', ok: 'Balanced', over: 'Over – more cash than expected', short: 'Short – cash is missing' };
+
+function salesText(date, r) {
+  const c = calc(r); const lines = [`${SHOP} – Daily sales`, fmtLong(date), ''];
+  for (const g of SALES_GROUPS) for (const [k, label] of g.fields) if (num(r[k])) lines.push(`${label}: ${money(num(r[k]))}`);
+  lines.push('', `Total sales: ${money(c.total)}`, `Cards & platforms: ${money(c.ded)}`, `Expected cash: ${money(c.expected)}`);
+  if (c.counted) {
+    lines.push(`Cash counted: ${money(num(r.cash))}`);
+    if (num(r.float)) lines.push(`Float kept: ${money(num(r.float))}`);
+    lines.push(`Difference: ${c.diff > 0 ? '+' : ''}${money(c.diff)} (${c.status === 'ok' ? 'balanced' : c.status})`);
+  }
+  if (r.note) lines.push('', `Note: ${r.note}`);
+  return lines.join('\n');
+}
+
+function renderSales(view) {
+  const rec = getRec(salesDate);
+  const save = () => { saveRec(salesDate, rec); refresh(); };
+  const moneyInput = (key, label) => h('label', { class: 'field' }, h('span', {}, label),
+    h('div', { class: 'money' }, h('input', {
+      class: 'input', inputmode: 'decimal', placeholder: '0.00', value: rec[key] ?? '', autocomplete: 'off',
+      onInput: (e) => { rec[key] = e.target.value; save(); },
+    })));
+
+  view.append(dateNav(salesDate, (d) => { salesDate = d; show('sales'); }));
+
+  // result card on top: the thing you look at
+  const big = h('div', { class: 'big' }); const verdict = h('div', { class: 'verdict' });
+  const L = {}; const line = (key, label, strong) => h('div', { class: 'sum-line' + (strong ? ' strong' : '') }, h('span', {}, label), L[key] = h('b'));
+  const result = h('section', { class: 'result', 'aria-live': 'polite' },
+    h('div', { class: 'label' }, 'Cash difference'), big, verdict,
+    h('div', { class: 'sum-lines' },
+      line('total', 'Total sales'), line('ded', 'Cards & platforms'), line('expected', 'Expected cash', true), line('takings', 'Cash takings')));
+  view.append(result);
+
+  for (const g of SALES_GROUPS) {
+    view.append(h('section', { class: 'card' }, h('h2', {}, g.title, g.hint && h('small', {}, g.hint)),
+      h('div', { class: 'fields' }, g.fields.map(([k, label]) => moneyInput(k, label)))));
+  }
+
+  // cash count
+  rec.denoms = rec.denoms || {};
+  const denomTotal = h('b');
+  const cashInput = h('input', { class: 'input', inputmode: 'decimal', placeholder: '0.00', value: rec.cash ?? '', onInput: (e) => { rec.cash = e.target.value; save(); } });
+  const sumDenoms = () => round2(DENOMS.reduce((s, [v]) => s + v * num(rec.denoms[v]), 0));
+  view.append(h('section', { class: 'card' },
+    h('h2', {}, 'Cash in the till'),
+    h('div', { class: 'fields' },
+      h('label', { class: 'field' }, h('span', {}, 'Cash counted'), h('div', { class: 'money' }, cashInput)),
+      h('label', { class: 'field' }, h('span', {}, 'Float kept in till'), h('div', { class: 'money' }, h('input', {
+        class: 'input', inputmode: 'decimal', placeholder: '0.00', value: rec.float ?? '',
+        onInput: (e) => { rec.float = e.target.value; save(); },
+      })))),
+    h('p', { class: 'hint' }, 'Float is the change you leave for tomorrow. It gets taken off the counted cash. Leave it empty if you count without the float.'),
+    h('details', { class: 'count' },
+      h('summary', {}, 'Count notes & coins'),
+      h('div', { class: 'denoms' }, DENOMS.map(([v, label]) => h('label', { class: 'field' }, h('span', {}, label),
+        h('input', { class: 'input num-input', inputmode: 'numeric', placeholder: '0', value: rec.denoms[v] ?? '',
+          onInput: (e) => { rec.denoms[v] = e.target.value; saveRec(salesDate, rec); denomTotal.textContent = money(sumDenoms()); } })))),
+      h('div', { class: 'row-between', style: 'padding-bottom:12px' },
+        h('div', {}, 'Total ', denomTotal),
+        h('button', { class: 'btn small primary', onClick: () => { rec.cash = sumDenoms().toFixed(2); cashInput.value = rec.cash; save(); toast('Cash counted set to ' + money(sumDenoms())); } }, 'Use this total')))));
+  denomTotal.textContent = money(sumDenoms());
+
+  view.append(h('section', { class: 'card' }, h('h2', {}, 'Note'),
+    h('textarea', { class: 'input', placeholder: 'Why it was short or over, refunds, paid-outs…', onInput: (e) => { rec.note = e.target.value; saveRec(salesDate, rec); } }, rec.note || '')));
+
+  view.append(h('div', { class: 'btn-row', style: 'margin-bottom:12px' },
+    h('button', { class: 'btn whatsapp', onClick: () => whatsapp(salesText(salesDate, rec)) }, 'Send on WhatsApp'),
+    h('button', { class: 'btn', onClick: () => copyText(salesText(salesDate, rec)) }, 'Copy'),
+    h('button', { class: 'btn danger', onClick: () => { if (confirm(`Clear everything for ${fmtLong(salesDate)}?`)) { saveRec(salesDate, {}); show('sales'); toast('Day cleared'); } } }, 'Clear day')));
+
+  // last 7 days
+  const chartBox = h('div');
+  view.append(h('section', { class: 'card' }, h('h2', {}, 'Last 7 days', h('small', {}, 'tap a day to open it')), chartBox,
+    h('div', { class: 'legend' }, h('span', {}, h('i', { style: 'background:var(--sage)' }), 'Balanced'), h('span', {}, h('i', { style: 'background:var(--amber)' }), 'Over'), h('span', {}, h('i', { style: 'background:var(--ember)' }), 'Short'))));
+
+  function drawChart() {
+    const all = allSales(); const days = [];
+    for (let i = 6; i >= 0; i--) days.push(addDays(salesDate, -i));
+    const data = days.map((k) => ({ k, c: all[k] ? calc(all[k]) : null }));
+    const max = Math.max(1, ...data.map((d) => (d.c ? d.c.total : 0)));
+    const weekTotal = data.reduce((s, d) => s + (d.c ? d.c.total : 0), 0);
+    chartBox.replaceChildren(
+      h('div', { class: 'week' }, data.map(({ k, c }) => h('button', {
+        class: 'bar' + (k === salesDate ? ' sel' : ''), 'aria-label': `${fmtLong(k)}: ${c ? money(c.total) : 'no sales'}`,
+        onClick: () => { salesDate = k; show('sales'); },
+      },
+      h('span', { style: 'font-size:11px;font-family:var(--num)' }, c && c.total ? '£' + Math.round(c.total) : ''),
+      h('div', { class: 'fill' + (c && c.total ? ' has' : ''), style: `height:${c ? Math.max(4, (c.total / max) * 100) : 4}px` }),
+      h('div', { class: 'dot ' + (c ? c.status : '') }),
+      h('div', { class: 'd' }, fmtDay(k, { weekday: 'short' }).slice(0, 2))))),
+      h('div', { class: 'sum-line', style: 'margin-top:10px' }, h('span', {}, '7-day sales'), h('b', {}, money(weekTotal))));
+  }
+
+  function refresh() {
+    const c = calc(rec);
+    result.className = 'result ' + c.status;
+    big.textContent = c.counted ? (c.diff > 0 ? '+' : '') + money(c.diff) : '–';
+    verdict.textContent = VERDICT[c.status];
+    L.total.textContent = money(c.total); L.ded.textContent = money(c.ded);
+    L.expected.textContent = money(c.expected); L.takings.textContent = c.counted ? money(c.takings) : '–';
+    drawChart();
+  }
+  refresh();
+}
+
+/* ================= STOCK LEDGER ================= */
+let stockWeek = weekStart(today());
+const stockForm = { type: 'in', date: today() };
+const getLedger = () => store.get('ledger', []);
+
+function renderStock(view) {
+  const ledger = getLedger();
+  const end = addDays(stockWeek, 6);
+  const week = ledger.filter((e) => e.date >= stockWeek && e.date <= end);
+  const spend = week.filter((e) => e.type !== 'waste').reduce((s, e) => s + e.qty * e.price, 0);
+  const waste = week.filter((e) => e.type === 'waste').reduce((s, e) => s + e.qty * e.price, 0);
+
+  view.append(dateNav(stockWeek, (d) => { stockWeek = weekStart(d); show('stock'); },
+    { step: 7, label: (k) => `${fmtDay(k, { day: 'numeric', month: 'short' })} – ${fmtDay(addDays(k, 6), { day: 'numeric', month: 'short' })}` }));
+
+  view.append(h('div', { class: 'stats' },
+    h('div', { class: 'stat' }, h('div', { class: 'v' }, money(spend)), h('div', { class: 'k' }, 'Spent on deliveries')),
+    h('div', { class: 'stat waste' }, h('div', { class: 'v' }, money(waste)), h('div', { class: 'k' }, 'Thrown away (waste)'))));
+
+  // add form
+  const names = catalog.map((i) => i.name);
+  const suppliers = [...new Set(ledger.map((e) => e.supplier).filter(Boolean))];
+  const f = {
+    item: h('input', { class: 'input', list: 'itemlist', placeholder: 'Start typing…', autocomplete: 'off' }),
+    qty: h('input', { class: 'input num-input', inputmode: 'decimal', placeholder: '1' }),
+    price: h('input', { class: 'input', inputmode: 'decimal', placeholder: '0.00' }),
+    supplier: h('input', { class: 'input', list: 'supplierlist', placeholder: 'Optional', autocomplete: 'off' }),
+    date: h('input', { class: 'input', type: 'date', value: stockForm.date, onChange: (e) => { stockForm.date = e.target.value; } }),
+  };
+  const lineTotal = h('b', {}, '£0.00');
+  const updTotal = () => { lineTotal.textContent = money(num(f.qty.value || 1) * num(f.price.value)); };
+  f.qty.addEventListener('input', updTotal); f.price.addEventListener('input', updTotal);
+  f.item.addEventListener('change', () => {
+    const last = [...ledger].reverse().find((e) => e.item.toLowerCase() === f.item.value.trim().toLowerCase());
+    if (last) { if (!f.price.value) f.price.value = last.price || ''; if (!f.supplier.value && last.supplier) f.supplier.value = last.supplier; updTotal(); }
+  });
+  const segBtn = (val, label) => h('button', { type: 'button', 'aria-pressed': String(stockForm.type === val), onClick: () => { stockForm.type = val; show('stock'); } }, label);
+
+  function add() {
+    const item = f.item.value.trim();
+    if (!item) { f.item.focus(); toast('Type an item name'); return; }
+    const qty = num(f.qty.value || 1); const price = num(f.price.value);
+    if (qty <= 0) { f.qty.focus(); toast('Quantity must be more than 0'); return; }
+    const all = getLedger();
+    all.push({ id: uid(), date: f.date.value || today(), type: stockForm.type, item, qty, price, supplier: f.supplier.value.trim() });
+    store.set('ledger', all);
+    stockWeek = weekStart(f.date.value || today());
+    toast(stockForm.type === 'waste' ? 'Waste logged' : 'Delivery logged');
+    show('stock');
+    $('#view input[list=itemlist]')?.focus();
+  }
+
+  view.append(h('section', { class: 'card addcard' },
+    h('h2', {}, stockForm.type === 'waste' ? 'Log waste' : 'Log a delivery'),
+    h('div', { class: 'seg', style: 'margin-bottom:12px' }, segBtn('in', 'Delivery in'), segBtn('waste', 'Waste')),
+    h('div', { class: 'fields' },
+      h('label', { class: 'field full' }, h('span', {}, 'Item'), f.item),
+      h('label', { class: 'field' }, h('span', {}, 'Quantity'), f.qty),
+      h('label', { class: 'field' }, h('span', {}, 'Price each'), h('div', { class: 'money' }, f.price)),
+      h('label', { class: 'field' }, h('span', {}, 'Date'), f.date),
+      h('label', { class: 'field' }, h('span', {}, 'Supplier'), f.supplier)),
+    h('datalist', { id: 'itemlist' }, names.map((n) => h('option', { value: n }))),
+    h('datalist', { id: 'supplierlist' }, suppliers.map((n) => h('option', { value: n }))),
+    h('div', { class: 'row-between', style: 'margin-top:12px' },
+      h('div', {}, 'Line total ', lineTotal),
+      h('button', { class: 'btn primary', onClick: add }, stockForm.type === 'waste' ? 'Add waste' : 'Add delivery')),
+    h('p', { class: 'hint' }, 'Last price and supplier fill in by themselves once you have logged an item before.')));
+
+  // top items
+  const byItem = {};
+  week.filter((e) => e.type !== 'waste').forEach((e) => { byItem[e.item] = (byItem[e.item] || 0) + e.qty * e.price; });
+  const top = Object.entries(byItem).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  if (top.length) {
+    const max = top[0][1] || 1;
+    view.append(h('section', { class: 'card' }, h('h2', {}, 'Biggest spends this week'),
+      h('div', { class: 'hbars' }, top.map(([n, v]) => h('div', { class: 'hb' },
+        h('div', { class: 'hb-top' }, h('span', {}, n), h('b', {}, money(v))),
+        h('div', { class: 'track' }, h('div', { style: `width:${Math.max(3, (v / max) * 100)}%` })))))));
+  }
+
+  // entries
+  const list = h('div');
+  const days = [...new Set(week.map((e) => e.date))].sort().reverse();
+  if (!days.length) list.append(h('div', { class: 'empty' }, 'Nothing logged this week. Add the first delivery above.'));
+  for (const d of days) {
+    list.append(h('div', { class: 'day-head' }, fmtLong(d)));
+    list.append(h('ul', { class: 'list' }, week.filter((e) => e.date === d).map((e) => h('li', { class: 'li' },
+      h('div', { class: 'main' },
+        h('div', { class: 'name' }, e.item, e.type === 'waste' && h('span', { class: 'tag' }, 'waste')),
+        h('div', { class: 'meta' }, `${e.qty} × ${money(e.price)}`, e.supplier ? ` · ${e.supplier}` : '')),
+      h('div', { class: 'amt' }, money(e.qty * e.price)),
+      h('button', { class: 'x', 'aria-label': 'Delete ' + e.item, onClick: () => {
+        if (!confirm(`Delete ${e.item} (${money(e.qty * e.price)})?`)) return;
+        store.set('ledger', getLedger().filter((x) => x.id !== e.id)); show('stock');
+      } }, '×')))));
+  }
+  const weekText = () => {
+    const lines = [`${SHOP} – Stock ledger`, `Week of ${fmtLong(stockWeek)}`, ''];
+    for (const d of [...days].reverse()) {
+      lines.push(fmtDay(d));
+      week.filter((e) => e.date === d).forEach((e) => lines.push(`• ${e.item} ${e.qty} × ${money(e.price)} = ${money(e.qty * e.price)}${e.type === 'waste' ? ' (WASTE)' : ''}${e.supplier ? ' – ' + e.supplier : ''}`));
+      lines.push('');
+    }
+    lines.push(`Deliveries: ${money(spend)}`, `Waste: ${money(waste)}`);
+    return lines.join('\n');
+  };
+  view.append(h('section', { class: 'card' }, h('h2', {}, 'This week', h('small', {}, `${week.length} entries`)), list,
+    week.length ? h('div', { class: 'btn-row', style: 'margin-top:12px' },
+      h('button', { class: 'btn whatsapp', onClick: () => whatsapp(weekText()) }, 'Send on WhatsApp'),
+      h('button', { class: 'btn', onClick: () => copyText(weekText()) }, 'Copy')) : null));
+}
+
+/* ================= SHIFT LEDGER ================= */
+let shiftWeek = weekStart(today());
+const getStaff = () => store.get('staff', []);
+const getShifts = () => store.get('shifts', []);
+const getOpen = () => store.get('open', {});
+const toMin = (t) => { const [a, b] = String(t || '0:0').split(':').map(Number); return a * 60 + (b || 0); };
+function shiftHours(s) {
+  let start = toMin(s.start), end = toMin(s.end);
+  if (end <= start) end += 1440; // past midnight
+  return Math.max(0, (end - start - num(s.brk)) / 60);
+}
+let shiftTimer;
+let staffOpen = null; // remembers if the Staff box is open
+
+function renderShifts(view) {
+  const staff = getStaff(); const open = getOpen();
+  const end = addDays(shiftWeek, 6);
+  const shifts = getShifts().filter((s) => s.date >= shiftWeek && s.date <= end);
+
+  // clock board
+  const board = h('div', { class: 'staff-grid' });
+  if (!staff.length) board.append(h('div', { class: 'empty' }, 'Add your staff below, then tap Clock in when someone starts.'));
+  for (const p of staff) {
+    const since = open[p.id] ? new Date(open[p.id]) : null;
+    const meta = h('div', { class: 'meta' });
+    const upd = () => {
+      if (!since) { meta.textContent = 'Not on shift'; return; }
+      const m = Math.floor((Date.now() - since) / 60000);
+      meta.textContent = `On shift since ${hhmm(since)} · ${Math.floor(m / 60)}h ${pad(m % 60)}m`;
+    };
+    upd(); meta.dataset.live = '1'; meta._upd = upd;
+    board.append(h('div', { class: 'staff' + (since ? ' on' : '') },
+      h('div', { class: 'avatar' }, (p.name[0] || '?').toUpperCase()),
+      h('div', { class: 'main' }, h('div', { class: 'name' }, p.name), meta),
+      since
+        ? h('button', { class: 'btn', onClick: () => clockOut(p) }, 'Clock out')
+        : h('button', { class: 'btn primary', onClick: () => { const o = getOpen(); o[p.id] = new Date().toISOString(); store.set('open', o); toast(`${p.name} clocked in`); show('shifts'); } }, 'Clock in')));
+  }
+  view.append(h('section', { class: 'card' }, h('h2', {}, 'Clock in / out', h('small', {}, fmtDay(today()))), board));
+  clearInterval(shiftTimer);
+  shiftTimer = setInterval(() => document.querySelectorAll('[data-live]').forEach((m) => m._upd && m._upd()), 30000);
+
+  function clockOut(p) {
+    const o = getOpen(); const since = new Date(o[p.id]); const now = new Date();
+    const all = getShifts();
+    all.push({ id: uid(), staffId: p.id, name: p.name, date: dkey(since), start: hhmm(since), end: hhmm(now), brk: 0 });
+    delete o[p.id]; store.set('open', o); store.set('shifts', all);
+    toast(`${p.name} clocked out – ${hrs((now - since) / 3600000)}`);
+    show('shifts');
+  }
+
+  // week
+  view.append(dateNav(shiftWeek, (d) => { shiftWeek = weekStart(d); show('shifts'); },
+    { step: 7, label: (k) => `${fmtDay(k, { day: 'numeric', month: 'short' })} – ${fmtDay(addDays(k, 6), { day: 'numeric', month: 'short' })}` }));
+
+  const per = {};
+  for (const s of shifts) { const key = s.staffId || s.name; per[key] = per[key] || { name: s.name, h: 0, n: 0 }; per[key].h += shiftHours(s); per[key].n++; }
+  const rows = Object.entries(per).sort((a, b) => b[1].h - a[1].h);
+  const totalH = rows.reduce((s, [, v]) => s + v.h, 0);
+  const rateOf = (id) => num((staff.find((p) => p.id === id) || {}).rate);
+  const totalPay = rows.reduce((s, [id, v]) => s + v.h * rateOf(id), 0);
+  const maxH = rows.length ? rows[0][1].h || 1 : 1;
+
+  view.append(h('div', { class: 'stats' },
+    h('div', { class: 'stat' }, h('div', { class: 'v' }, hrs(totalH)), h('div', { class: 'k' }, 'Hours this week')),
+    h('div', { class: 'stat' }, h('div', { class: 'v' }, totalPay ? money(totalPay) : `${shifts.length}`), h('div', { class: 'k' }, totalPay ? 'Wages (where a rate is set)' : 'Shifts logged'))));
+
+  if (rows.length) view.append(h('section', { class: 'card' }, h('h2', {}, 'Hours by person'),
+    h('div', { class: 'hbars' }, rows.map(([id, v]) => h('div', { class: 'hb' },
+      h('div', { class: 'hb-top' }, h('span', {}, `${v.name} `, h('span', { class: 'muted' }, `· ${v.n} shift${v.n > 1 ? 's' : ''}`)),
+        h('b', {}, hrs(v.h), rateOf(id) ? ` · ${money(v.h * rateOf(id))}` : '')),
+      h('div', { class: 'track' }, h('div', { style: `width:${Math.max(3, (v.h / maxH) * 100)}%;background:var(--sage)` })))))));
+
+  // manual add
+  const sf = {
+    who: h('select', { class: 'input' }, staff.map((p) => h('option', { value: p.id }, p.name))),
+    date: h('input', { class: 'input', type: 'date', value: today() }),
+    start: h('input', { class: 'input', type: 'time', value: '17:00' }),
+    end: h('input', { class: 'input', type: 'time', value: '23:00' }),
+    brk: h('input', { class: 'input num-input', inputmode: 'numeric', placeholder: '0' }),
+  };
+  view.append(h('details', { class: 'card' },
+    h('summary', { style: 'cursor:pointer;font-weight:600;min-height:28px' }, 'Add a shift by hand'),
+    staff.length ? h('div', { style: 'margin-top:12px' },
+      h('div', { class: 'fields' },
+        h('label', { class: 'field' }, h('span', {}, 'Who'), sf.who),
+        h('label', { class: 'field' }, h('span', {}, 'Date'), sf.date),
+        h('label', { class: 'field' }, h('span', {}, 'Start'), sf.start),
+        h('label', { class: 'field' }, h('span', {}, 'Finish'), sf.end),
+        h('label', { class: 'field full' }, h('span', {}, 'Break (minutes)'), sf.brk)),
+      h('button', { class: 'btn primary', style: 'width:100%;margin-top:12px', onClick: () => {
+        const p = staff.find((x) => x.id === sf.who.value); if (!p || !sf.date.value) return;
+        const all = getShifts();
+        all.push({ id: uid(), staffId: p.id, name: p.name, date: sf.date.value, start: sf.start.value, end: sf.end.value, brk: num(sf.brk.value) });
+        store.set('shifts', all); shiftWeek = weekStart(sf.date.value); toast('Shift added'); show('shifts');
+      } }, 'Add shift')) : h('p', { class: 'hint' }, 'Add staff first.')));
+
+  // shift list
+  const days = [...new Set(shifts.map((s) => s.date))].sort().reverse();
+  const list = h('div');
+  if (!days.length) list.append(h('div', { class: 'empty' }, 'No shifts this week yet.'));
+  for (const d of days) {
+    list.append(h('div', { class: 'day-head' }, fmtLong(d)));
+    list.append(h('ul', { class: 'list' }, shifts.filter((s) => s.date === d).map((s) => h('li', { class: 'li' },
+      h('div', { class: 'main' }, h('div', { class: 'name' }, s.name), h('div', { class: 'meta' }, `${s.start} – ${s.end}${num(s.brk) ? ` · ${s.brk} min break` : ''}`)),
+      h('div', { class: 'amt' }, hrs(shiftHours(s))),
+      h('button', { class: 'x', 'aria-label': 'Delete shift', onClick: () => {
+        if (!confirm(`Delete ${s.name}'s shift on ${fmtDay(s.date)}?`)) return;
+        store.set('shifts', getShifts().filter((x) => x.id !== s.id)); show('shifts');
+      } }, '×')))));
+  }
+  const weekText = () => {
+    const lines = [`${SHOP} – Shifts`, `Week of ${fmtLong(shiftWeek)}`, ''];
+    rows.forEach(([id, v]) => lines.push(`${v.name}: ${hrs(v.h)} (${v.n} shifts)${rateOf(id) ? ' – ' + money(v.h * rateOf(id)) : ''}`));
+    lines.push('', `Total: ${hrs(totalH)}`);
+    return lines.join('\n');
+  };
+  view.append(h('section', { class: 'card' }, h('h2', {}, 'Shifts this week'), list,
+    shifts.length ? h('div', { class: 'btn-row', style: 'margin-top:12px' },
+      h('button', { class: 'btn whatsapp', onClick: () => whatsapp(weekText()) }, 'Send on WhatsApp'),
+      h('button', { class: 'btn', onClick: () => copyText(weekText()) }, 'Copy')) : null));
+
+  // staff management
+  const nm = h('input', { class: 'input', placeholder: 'Name' });
+  const rt = h('input', { class: 'input', inputmode: 'decimal', placeholder: 'Optional' });
+  view.append(h('details', { class: 'card', open: staffOpen ?? !staff.length, onToggle: (e) => { staffOpen = e.target.open; } },
+    h('summary', { style: 'cursor:pointer;font-weight:600;min-height:28px' }, `Staff (${staff.length})`),
+    h('ul', { class: 'list', style: 'margin-top:8px' }, staff.map((p) => h('li', { class: 'li' },
+      h('div', { class: 'main' }, h('div', { class: 'name' }, p.name), h('div', { class: 'meta' }, p.rate ? `${money(num(p.rate))} an hour` : 'No rate set')),
+      h('button', { class: 'x', 'aria-label': 'Remove ' + p.name, onClick: () => {
+        if (!confirm(`Remove ${p.name}? Their past shifts stay in the ledger.`)) return;
+        store.set('staff', getStaff().filter((x) => x.id !== p.id));
+        const o = getOpen(); delete o[p.id]; store.set('open', o); show('shifts');
+      } }, '×')))),
+    h('div', { class: 'fields', style: 'margin-top:10px' },
+      h('label', { class: 'field' }, h('span', {}, 'Name'), nm),
+      h('label', { class: 'field' }, h('span', {}, 'Hourly rate'), h('div', { class: 'money' }, rt))),
+    h('p', { class: 'hint' }, 'There is no password, so anyone with this phone can see rates. Leave rate empty to track hours only.'),
+    h('button', { class: 'btn primary', style: 'width:100%;margin-top:10px', onClick: () => {
+      const name = nm.value.trim(); if (!name) { nm.focus(); return; }
+      const all = getStaff(); all.push({ id: uid(), name, rate: rt.value.trim() }); store.set('staff', all);
+      toast(`${name} added`); show('shifts');
+    } }, 'Add staff member')));
+}
+
+/* ================= ORDER PAD ================= */
+let orderQuery = '';
+let editMode = false;
+const getBasket = () => store.get('basket', {});
+const setBasket = (b) => store.set('basket', b);
+const collapsed = new Set(store.get('collapsed', []));
+
+function orderText(basket) {
+  const lines = [`${SHOP} – Order`, fmtLong(today()), ''];
+  for (const sec of sections()) {
+    const items = catalog.filter((i) => i.section === sec && basket[i.id] > 0);
+    if (!items.length) continue;
+    lines.push(sec.toUpperCase());
+    items.forEach((i) => lines.push(`• ${i.name} x ${basket[i.id]}`));
+    lines.push('');
+  }
+  return lines.join('\n').trim();
+}
+
+function renderOrder(view) {
+  const basketBox = h('div'); const addBox = h('div'); const listBox = h('div');
+  const search = h('input', {
+    class: 'input', type: 'search', placeholder: 'Search or type a new item…', value: orderQuery, autocomplete: 'off',
+    onInput: (e) => { orderQuery = e.target.value; drawAdd(); drawList(); },
+  });
+  view.append(
+    h('div', { class: 'search' },
+      h('div', { class: 'search-wrap' }, h('span', { html: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>' }), search)),
+    basketBox, addBox,
+    h('div', { class: 'row-between', style: 'margin:4px 0 2px' },
+      h('div', { class: 'muted', style: 'font-size:14px' }, editMode ? 'Change usual amounts or remove items' : 'Tap an item to add it'),
+      h('button', { class: 'btn small' + (editMode ? ' primary' : ''), onClick: () => { editMode = !editMode; show('order'); } }, editMode ? 'Done editing' : 'Edit list')),
+    listBox);
+
+  function drawBasket() {
+    const b = getBasket();
+    const lines = catalog.filter((i) => b[i.id] > 0);
+    const count = lines.length;
+    let pill = $('#orderPill');
+    if (count && !editMode) {
+      if (!pill) { pill = h('button', { class: 'pill', id: 'orderPill', onClick: () => basketBox.scrollIntoView({ behavior: 'smooth' }) }); document.body.append(pill); }
+      pill.textContent = `View order (${count})`;
+    } else pill?.remove();
+
+    if (!count) {
+      const hist = store.get('orderHistory', []);
+      basketBox.replaceChildren(hist.length && !editMode ? h('section', { class: 'card' },
+        h('div', { class: 'row-between' },
+          h('div', {}, h('div', { style: 'font-weight:600' }, 'Order is empty'), h('div', { class: 'hint', style: 'margin:0' }, `Last order: ${fmtDay(hist[0].date)} · ${hist[0].lines.length} items`)),
+          h('button', { class: 'btn small', onClick: () => {
+            const nb = {}; hist[0].lines.forEach(([id, q]) => { if (catalog.some((i) => i.id === id)) nb[id] = q; });
+            setBasket(nb); drawBasket(); drawList(); toast('Last order loaded');
+          } }, 'Repeat last order'))) : '');
+      return;
+    }
+    basketBox.replaceChildren(h('section', { class: 'card basket' },
+      h('h2', {}, 'Your order', h('small', {}, `${count} item${count > 1 ? 's' : ''}`)),
+      h('ul', { class: 'list' }, lines.map((i) => h('li', { class: 'li' },
+        h('div', { class: 'main' }, h('div', { class: 'name' }, i.name), h('div', { class: 'meta' }, i.section)),
+        h('div', { class: 'stepper' },
+          h('button', { 'aria-label': 'Less', onClick: () => bump(i, -1) }, '−'),
+          h('span', { class: 'q' }, b[i.id]),
+          h('button', { 'aria-label': 'More', onClick: () => bump(i, 1) }, '+')),
+        h('button', { class: 'x', 'aria-label': 'Take off order', onClick: () => bump(i, -b[i.id]) }, '×')))),
+      h('div', { class: 'btn-row', style: 'margin-top:12px' },
+        h('button', { class: 'btn whatsapp', onClick: () => whatsapp(orderText(getBasket())) }, 'Send on WhatsApp'),
+        h('button', { class: 'btn', onClick: () => copyText(orderText(getBasket())) }, 'Copy')),
+      h('div', { class: 'btn-row', style: 'margin-top:8px' },
+        h('button', { class: 'btn primary', onClick: () => {
+          const bb = getBasket(); const hist = store.get('orderHistory', []);
+          hist.unshift({ date: today(), lines: Object.entries(bb).filter(([, q]) => q > 0) });
+          store.set('orderHistory', hist.slice(0, 20)); setBasket({}); drawBasket(); drawList(); toast('Order saved and cleared');
+        } }, 'Order done – clear'),
+        h('button', { class: 'btn danger', onClick: () => { if (confirm('Empty the order without saving?')) { setBasket({}); drawBasket(); drawList(); } } }, 'Empty'))));
+  }
+
+  function bump(item, delta) {
+    const b = getBasket(); const q = Math.max(0, (b[item.id] || 0) + delta);
+    if (q) b[item.id] = round2(q); else delete b[item.id];
+    setBasket(b); drawBasket(); drawList();
+  }
+
+  function drawAdd() {
+    const q = orderQuery.trim();
+    const exact = q && catalog.some((i) => i.name.toLowerCase() === q.toLowerCase());
+    if (!(q && !exact) && !editMode) { addBox.replaceChildren(); return; }
+    const secs = sections();
+    const nameIn = h('input', { class: 'input', value: q, placeholder: 'Item name' });
+    const secSel = h('select', { class: 'input' }, secs.map((s) => h('option', { value: s, selected: s === 'Miscellaneous' }, s)), h('option', { value: '__new' }, '+ New section…'));
+    const newSec = h('input', { class: 'input', placeholder: 'New section name', style: 'display:none;margin-top:8px' });
+    secSel.addEventListener('change', () => { newSec.style.display = secSel.value === '__new' ? '' : 'none'; if (secSel.value === '__new') newSec.focus(); });
+    const usual = h('input', { class: 'input num-input', inputmode: 'decimal', value: '1' });
+    const save = (alsoOrder) => {
+      const name = nameIn.value.trim(); if (!name) { nameIn.focus(); return; }
+      if (catalog.some((i) => i.name.toLowerCase() === name.toLowerCase())) { toast(`${name} is already on the list`); return; }
+      const section = secSel.value === '__new' ? newSec.value.trim() || 'Other' : secSel.value;
+      const item = { id: 'c' + uid(), section, name, usual: num(usual.value) || 1 };
+      // put it at the end of its section so the list stays grouped
+      const lastIdx = catalog.map((i) => i.section).lastIndexOf(section);
+      if (lastIdx === -1) catalog.push(item); else catalog.splice(lastIdx + 1, 0, item);
+      saveCatalog();
+      collapsed.delete(section); store.set('collapsed', [...collapsed]);
+      if (alsoOrder) { const b = getBasket(); b[item.id] = item.usual; setBasket(b); }
+      orderQuery = ''; search.value = '';
+      toast(alsoOrder ? `${name} added to the list and the order` : `${name} added to the list`);
+      drawAdd(); drawBasket(); drawList();
+    };
+    addBox.replaceChildren(h('section', { class: 'card addcard' },
+      h('h2', {}, q && !exact ? `“${q}” isn't on the list yet` : 'Add a new item'),
+      h('div', { class: 'fields' },
+        h('label', { class: 'field full' }, h('span', {}, 'Name'), nameIn),
+        h('label', { class: 'field' }, h('span', {}, 'Section'), secSel, newSec),
+        h('label', { class: 'field' }, h('span', {}, 'Usual amount'), usual)),
+      h('p', { class: 'hint' }, 'It stays on the list for next time. Remove it with Edit list when you stop ordering it.'),
+      h('div', { class: 'btn-row', style: 'margin-top:10px' },
+        !editMode && h('button', { class: 'btn primary', onClick: () => save(true) }, 'Add & put in order'),
+        h('button', { class: 'btn' + (editMode ? ' primary' : ''), onClick: () => save(false) }, 'Add to list only'))));
+  }
+
+  function drawList() {
+    const q = orderQuery.trim().toLowerCase();
+    const b = getBasket();
+    const frag = [];
+    for (const sec of sections()) {
+      const items = catalog.filter((i) => i.section === sec && (!q || i.name.toLowerCase().includes(q)));
+      if (!items.length) continue;
+      const isCollapsed = !q && collapsed.has(sec);
+      const inOrder = items.filter((i) => b[i.id] > 0).length;
+      frag.push(h('button', { class: 'section-h', 'aria-expanded': String(!isCollapsed), onClick: () => {
+        if (collapsed.has(sec)) collapsed.delete(sec); else collapsed.add(sec);
+        store.set('collapsed', [...collapsed]); drawList();
+      } }, h('span', {}, (isCollapsed ? '▸ ' : '▾ ') + sec), h('span', { class: 'c' }, inOrder ? `${inOrder} in order · ${items.length}` : `${items.length} items`)));
+      if (isCollapsed) continue;
+      frag.push(h('div', { class: 'items' }, items.map((i) => editMode ? editRow(i) : itemRow(i, b[i.id]))));
+    }
+    if (!frag.length) frag.push(h('div', { class: 'empty' }, q ? 'No items match. Use the box above to add it.' : 'The list is empty. Add your first item above.'));
+    listBox.replaceChildren(...frag);
+  }
+
+  function itemRow(i, qty) {
+    return h('button', { class: 'item' + (qty ? ' in' : ''), 'data-id': i.id, onClick: (e) => {
+      bump(i, i.usual);
+      const row = listBox.querySelector(`[data-id="${i.id}"]`); row?.classList.add('flash');
+    } },
+    h('span', { class: 'nm' }, i.name),
+    h('span', { class: 'plus' }, '+' + i.usual),
+    qty ? h('span', { class: 'badge' }, qty) : null);
+  }
+
+  function editRow(i) {
+    const q = h('span', { class: 'q' }, i.usual);
+    const set = (v) => { i.usual = Math.max(1, round2(v)); q.textContent = i.usual; saveCatalog(); };
+    return h('div', { class: 'item edit' },
+      h('span', { class: 'nm' }, i.name),
+      h('div', { class: 'stepper' },
+        h('button', { 'aria-label': 'Usual amount down', onClick: () => set(i.usual - 1) }, '−'),
+        q,
+        h('button', { 'aria-label': 'Usual amount up', onClick: () => set(i.usual + 1) }, '+')),
+      h('button', { class: 'x', 'aria-label': 'Remove ' + i.name, onClick: () => {
+        if (!confirm(`Remove “${i.name}” from the list? You can add it back any time.`)) return;
+        catalog = catalog.filter((x) => x.id !== i.id); saveCatalog();
+        const bb = getBasket(); delete bb[i.id]; setBasket(bb);
+        toast(`${i.name} removed`); drawBasket(); drawList();
+      } }, h('span', { html: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>' })));
+  }
+
+  drawBasket(); drawAdd(); drawList();
+}
+
+/* ================= SETTINGS / BACKUP ================= */
+let installEvent = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvent = e; });
+
+function openSettings() {
+  const dlg = $('#settings'); const body = $('#settingsBody');
+  const settings = store.get('settings', {});
+  const floatIn = h('input', { class: 'input', inputmode: 'decimal', placeholder: '0.00', value: settings.float ?? '',
+    onInput: (e) => { const s = store.get('settings', {}); s.float = e.target.value; store.set('settings', s); } });
+  const fileIn = h('input', { type: 'file', accept: 'application/json,.json', style: 'display:none', onChange: async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      if (!data || data.app !== 'fc-daily' || typeof data.data !== 'object') throw new Error('bad');
+      if (!confirm('Replace everything on this phone with the backup?')) return;
+      Object.keys(localStorage).filter((k) => k.startsWith('fc.')).forEach((k) => localStorage.removeItem(k));
+      for (const [k, v] of Object.entries(data.data)) localStorage.setItem(k, v);
+      location.reload();
+    } catch { toast('That file is not a Favorable Chicken backup'); }
+  } });
+
+  body.replaceChildren(
+    h('div', { class: 'row-between' }, h('h3', {}, 'Settings'), h('button', { class: 'btn small', onClick: () => dlg.close() }, 'Close')),
+    h('p', { class: 'hint' }, 'Everything is saved on this phone only and works with no internet.'),
+
+    h('h4', {}, 'Usual cash float'),
+    h('div', { class: 'money' }, floatIn),
+    h('p', { class: 'hint' }, 'Filled in automatically on each new day in Daily sales.'),
+
+    h('h4', {}, 'Backup'),
+    h('p', { class: 'hint', style: 'margin-bottom:8px' }, 'Download a backup each week. Use Restore to move your data to a new phone.'),
+    h('div', { class: 'btn-row' },
+      h('button', { class: 'btn primary', onClick: () => {
+        const data = {}; Object.keys(localStorage).filter((k) => k.startsWith('fc.')).forEach((k) => { data[k] = localStorage.getItem(k); });
+        const blob = new Blob([JSON.stringify({ app: 'fc-daily', version: 1, saved: new Date().toISOString(), data }, null, 1)], { type: 'application/json' });
+        const a = h('a', { href: URL.createObjectURL(blob), download: `favorable-chicken-backup-${today()}.json` });
+        document.body.append(a); a.click(); a.remove(); toast('Backup downloaded');
+        const s = store.get('settings', {}); s.lastBackup = today(); store.set('settings', s);
+      } }, 'Download backup'),
+      h('button', { class: 'btn', onClick: () => fileIn.click() }, 'Restore'), fileIn),
+    settings.lastBackup ? h('p', { class: 'hint' }, `Last backup: ${fmtLong(settings.lastBackup)}`) : null,
+
+    h('h4', {}, 'Install on this phone'),
+    installEvent
+      ? h('button', { class: 'btn', style: 'width:100%', onClick: async () => { installEvent.prompt(); installEvent = null; dlg.close(); } }, 'Install app')
+      : h('p', { class: 'hint' }, 'iPhone: Safari › Share › Add to Home Screen. Android: Chrome menu › Install app.'),
+
+    h('h4', {}, 'Order list'),
+    h('button', { class: 'btn danger', style: 'width:100%', onClick: () => {
+      if (!confirm('Put the order list back to the original items? Items you added will be removed.')) return;
+      catalog = defaultCatalog(); saveCatalog(); setBasket({}); dlg.close(); show(current); toast('Order list reset');
+    } }, 'Reset order list to original'),
+
+    h('h4', {}, 'Danger zone'),
+    h('button', { class: 'btn danger', style: 'width:100%', onClick: () => {
+      if (!confirm('Delete ALL sales, stock, shifts and orders on this phone?')) return;
+      if (!confirm('Last check – this cannot be undone. Delete everything?')) return;
+      Object.keys(localStorage).filter((k) => k.startsWith('fc.')).forEach((k) => localStorage.removeItem(k));
+      location.reload();
+    } }, 'Delete all data'),
+    h('p', { class: 'hint', style: 'margin-top:16px' }, 'FC Daily v1'));
+  dlg.showModal();
+}
+$('#settings').addEventListener('click', (e) => { if (e.target.id === 'settings') e.target.close(); });
+$('#settingsBtn').addEventListener('click', openSettings);
+
+/* ================= TABS ================= */
+const ICONS = {
+  sales: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M14.5 8.5c-.4-.9-1.2-1.4-2.3-1.4-1.6 0-2.4 1-2.4 2.3 0 1 .4 1.8.4 3 0 .8-.3 1.4-1.2 2.1h5.5M9 12h4"/></svg>',
+  stock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 8-9-5-9 5v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg>',
+  shifts: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  order: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M9 10h6M9 14h6M9 18h3"/></svg>',
+};
+const TABS = [
+  { key: 'sales', label: 'Daily sales', sub: 'Cash up the day', render: renderSales },
+  { key: 'stock', label: 'Stock', sub: 'Deliveries & waste ledger', render: renderStock },
+  { key: 'shifts', label: 'Shifts', sub: 'Clock in, hours ledger', render: renderShifts },
+  { key: 'order', label: 'Order pad', sub: 'Build the supplier order', render: renderOrder },
+];
+let current = store.get('tab', 'sales');
+if (!TABS.some((t) => t.key === current)) current = 'sales';
+
+const tabsInner = h('div', { class: 'tabs-inner' }, TABS.map((t) => h('button', { class: 'tab', 'data-tab': t.key, onClick: () => show(t.key) }, h('span', { html: ICONS[t.key] }), t.label)));
+$('#tabs').append(tabsInner);
+
+function show(key) {
+  const changed = key !== current;
+  current = key; store.set('tab', key);
+  const t = TABS.find((x) => x.key === key);
+  document.querySelectorAll('.tab').forEach((b) => b.toggleAttribute('aria-current', false));
+  document.querySelector(`.tab[data-tab="${key}"]`).setAttribute('aria-current', 'page');
+  $('#subtitle').textContent = t.sub;
+  if (key !== 'shifts') clearInterval(shiftTimer);
+  if (key !== 'order') $('#orderPill')?.remove();
+  const view = $('#view'); const y = window.scrollY;
+  view.replaceChildren(); t.render(view);
+  window.scrollTo(0, changed ? 0 : y);
+}
+show(current);
+
+/* ================= offline ================= */
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+navigator.storage?.persist?.().catch(() => {});
