@@ -1,5 +1,5 @@
 // Daily Tools offline shell. Change VERSION with each release.
-const VERSION = 'fc-daily-v5-design-pdf';
+const VERSION = 'fc-daily-v6-order-and-seven-day-pdf';
 const SHELL = ['./', './index.html', './art.js', './app.js', './styles.css', './reports.js', './pdf-lib.min.js', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (event) => {
@@ -46,4 +46,3 @@ self.addEventListener('fetch', (event) => {
     }
   })());
 });
-

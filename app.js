@@ -81,14 +81,16 @@ function whatsapp(text) { window.open('https://wa.me/?text=' + encodeURIComponen
 const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 // Downloads are generated locally. The print sheet is also a fallback for unsupported fonts.
-async function printDoc(title, sub, bodyHtml) {
+async function printDoc(title, sub, bodyHtml, options = {}) {
   let sheet = $('#printSheet');
   if (!sheet) { sheet = h('div', { class: 'print-sheet', id: 'printSheet' }); document.body.append(sheet); }
-  sheet.innerHTML = `<header class="report-brand">${ART.hen}<div><b>${esc(SHOP)}</b><span>DAILY TOOLS / SHOP RECORDS</span></div></header><h2>${esc(title)}</h2><div class="psub">${esc(sub)}</div>${bodyHtml}<footer class="report-footer">Generated on this device · ${esc(fmtLong(today()))}</footer>`;
+  sheet.innerHTML = options.plain
+    ? `<h2>${esc(title)}</h2><div class="psub">${esc(sub)}</div>${bodyHtml}`
+    : `<header class="report-brand">${ART.hen}<div><b>${esc(SHOP)}</b><span>DAILY TOOLS / SHOP RECORDS</span></div></header><h2>${esc(title)}</h2><div class="psub">${esc(sub)}</div>${bodyHtml}<footer class="report-footer">Generated on this device · ${esc(fmtLong(today()))}</footer>`;
   try {
     if (!window.DailyPDF) throw new Error('PDF renderer unavailable');
     toast('Preparing PDF…');
-    await window.DailyPDF.download(title, sub, bodyHtml, SHOP);
+    await window.DailyPDF.download(title, sub, bodyHtml, SHOP, options);
     toast('PDF downloaded');
   } catch (error) {
     console.warn('Direct PDF unavailable; opening print fallback', error);
@@ -171,6 +173,22 @@ function calc(r) {
   return { total, ded, expected, counted, takings, diff, status };
 }
 const VERDICT = { none: 'Count the cash to see the difference', ok: 'Balanced', over: 'Over – more cash than expected', short: 'Short – cash is missing' };
+
+function sevenDaySalesReport(endDate) {
+  const all = allSales(); const days = [];
+  for (let i = 6; i >= 0; i--) days.push(addDays(endDate, -i));
+  let front = 0, delivery = 0, recorded = 0;
+  const rows = days.map((date) => {
+    const rec = all[date];
+    const label = esc(fmtDay(date, { weekday: 'short', day: 'numeric', month: 'short' }));
+    if (!rec) return `<tr><td>${label}</td><td class="r">Not recorded</td><td class="r">Not recorded</td><td class="r">Not recorded</td></tr>`;
+    recorded++; front += num(rec.front); delivery += num(rec.delivery);
+    return `<tr><td>${label}</td><td class="r">${money(num(rec.front))}</td><td class="r">${money(num(rec.delivery))}</td><td class="r">${money(calc(rec).total)}</td></tr>`;
+  }).join('');
+  const period = `${fmtDay(days[0], { day: 'numeric', month: 'long', year: 'numeric' })} – ${fmtDay(endDate, { day: 'numeric', month: 'long', year: 'numeric' })}`;
+  const html = `<table><thead><tr><th>Day</th><th class="r">Front</th><th class="r">Delivery</th><th class="r">Total sales</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><td>7-day total</td><td class="r">${money(front)}</td><td class="r">${money(delivery)}</td><td class="r">${money(front + delivery)}</td></tr></tfoot></table><p>${recorded} of 7 days have saved records. Days marked Not recorded are excluded from the totals.</p>`;
+  return { period, html };
+}
 
 function salesText(date, r) {
   const c = calc(r); const lines = [`${SHOP} – Daily sales`, fmtLong(date), ''];
@@ -256,7 +274,11 @@ function renderSales(view) {
   // last 7 days
   const chartBox = h('div');
   view.append(h('section', { class: 'card' }, h('h2', {}, 'Last 7 days', h('small', {}, 'tap a day to open it')), chartBox,
-    h('div', { class: 'legend' }, h('span', {}, h('i', { style: 'background:var(--sage)' }), 'Balanced'), h('span', {}, h('i', { style: 'background:var(--amber)' }), 'Over'), h('span', {}, h('i', { style: 'background:var(--ember)' }), 'Short'))));
+    h('div', { class: 'legend' }, h('span', {}, h('i', { style: 'background:var(--sage)' }), 'Balanced'), h('span', {}, h('i', { style: 'background:var(--amber)' }), 'Over'), h('span', {}, h('i', { style: 'background:var(--ember)' }), 'Short')),
+    h('button', { class: 'btn primary', style: 'width:100%;margin-top:16px', onClick: () => {
+      const report = sevenDaySalesReport(salesDate);
+      printDoc('7-day sales', report.period, report.html);
+    } }, 'Download 7-day sales PDF')));
 
   function drawChart() {
     const all = allSales(); const days = [];
@@ -696,15 +718,11 @@ const setBasket = (b) => store.set('basket', b);
 const collapsed = new Set(store.get('collapsed', []));
 
 function orderText(basket) {
-  const lines = [`${SHOP} – Order`, fmtLong(today()), ''];
-  for (const sec of sections()) {
-    const items = catalog.filter((i) => i.section === sec && basket[i.id] > 0);
-    if (!items.length) continue;
-    lines.push(sec.toUpperCase());
-    items.forEach((i) => lines.push(`• ${i.name} x ${basket[i.id]}`));
-    lines.push('');
-  }
-  return lines.join('\n').trim();
+  return [`${SHOP} – Order`, fmtLong(today()), ...orderLines(basket)].join('\n');
+}
+
+function orderLines(basket) {
+  return catalog.filter((i) => basket[i.id] > 0).map((i) => `• ${i.name} x ${basket[i.id]}`);
 }
 
 function renderOrder(view) {
@@ -759,15 +777,8 @@ function renderOrder(view) {
         h('button', { class: 'btn whatsapp', onClick: () => whatsapp(orderText(getBasket())) }, 'Send on WhatsApp'),
         h('button', { class: 'btn', onClick: () => copyText(orderText(getBasket())) }, 'Copy'),
         h('button', { class: 'btn', onClick: () => {
-          const b = getBasket(); let body = '';
-          for (const sec of sections()) {
-            const items = catalog.filter((i) => i.section === sec && b[i.id] > 0);
-            if (!items.length) continue;
-            body += `<h3>${esc(sec)}</h3><table><thead><tr><th>Item</th><th class="r">Quantity</th></tr></thead><tbody>`;
-            body += items.map((i) => `<tr><td>${esc(i.name)}</td><td class="r">${num(b[i.id])}</td></tr>`).join('');
-            body += '</tbody></table>';
-          }
-          printDoc('Supplier order', fmtLong(today()), body);
+          const body = '<ul>' + orderLines(getBasket()).map((line) => `<li>${esc(line.slice(2))}</li>`).join('') + '</ul>';
+          printDoc(`${SHOP} – Order`, fmtLong(today()), body, { plain: true });
         } }, 'Download PDF')),
       h('div', { class: 'btn-row', style: 'margin-top:8px' },
         h('button', { class: 'btn primary', onClick: () => {
@@ -979,4 +990,3 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 navigator.storage?.persist?.().catch(() => {});
-
