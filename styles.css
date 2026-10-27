@@ -517,3 +517,23 @@ body {background:var(--bg);font-feature-settings:"ss01";}
  .print-sheet p {background:#EDF2E5;padding:14px;font-size:11px;line-height:1.6;}
  .print-sheet .report-footer {border-top:1px solid #DADFD2;padding-top:12px;margin-top:26px;font-size:9px;color:#59695E;}
 }
+
+/* Daily sales composition, with an exact-value keyboard-accessible key. */
+.sales-chart-controls{display:flex;gap:6px;margin-bottom:10px;}
+.sales-chart-controls .btn{min-width:76px;}
+.sales-chart-period{margin:0 0 18px;}
+.sales-donut-layout{display:grid;grid-template-columns:minmax(180px,1fr) minmax(210px,1fr);gap:24px;align-items:center;}
+.sales-donut{width:100%;max-width:260px;aspect-ratio:1;border-radius:50%;position:relative;margin:auto;}
+.sales-donut-center{position:absolute;inset:19%;border-radius:50%;background:var(--card,#fffdf8);display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;gap:5px;padding:12px;}
+.sales-donut-center span,.sales-donut-center small{font-size:11px;color:var(--muted);}
+.sales-donut-center b{font-family:var(--num);font-size:clamp(19px,3vw,27px);line-height:1.15;overflow-wrap:anywhere;max-width:100%;}
+.sales-donut-key{display:grid;gap:2px;min-width:0;}
+.sales-donut-day{display:flex;gap:10px;align-items:center;text-align:left;border:1px solid transparent;background:transparent;border-radius:10px;padding:8px;color:var(--ink);width:100%;min-height:53px;cursor:pointer;}
+.sales-donut-day.selected{background:var(--sage-soft,#edf2e5);border-color:var(--line);}
+.sales-donut-day:hover{border-color:var(--line);}
+.sales-donut-day i{width:10px;height:10px;flex:none;border-radius:50%;}
+.sales-donut-date,.sales-donut-value{display:flex;flex-direction:column;gap:3px;font-size:12px;}
+.sales-donut-date{flex:1;min-width:0;}
+.sales-donut-day small{font-size:11px;color:var(--muted);}
+.sales-donut-value{text-align:right;font-family:var(--num);flex:none;}
+@media(max-width:540px){.sales-donut-layout{grid-template-columns:1fr;gap:20px;}.sales-donut{max-width:230px;}.sales-donut-center b{font-size:24px;}}

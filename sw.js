@@ -1,5 +1,5 @@
 // Daily Tools offline shell. Change VERSION with each release.
-const VERSION = 'fc-daily-v7-shop-operations';
+const VERSION = 'fc-daily-v8-sales-donut';
 const SHELL = ['./', './index.html', './art.js', './app.js', './styles.css', './reports.js', './ops-core.js', './operations.js', './pdf-lib.min.js', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (event) => {

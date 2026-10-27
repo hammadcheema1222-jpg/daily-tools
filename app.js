@@ -150,6 +150,7 @@ const SALES_GROUPS = [
 const DEDUCT = ['jeat', 'uber', 'delivero', 'deliveryDrop', 'pout', 'dojo', 'teya'];
 const DENOMS = [[50, '£50'], [20, '£20'], [10, '£10'], [5, '£5'], [2, '£2'], [1, '£1'], [0.5, '50p'], [0.2, '20p'], [0.1, '10p'], [0.05, '5p'], [0.02, '2p'], [0.01, '1p']];
 let salesDate = Ops.businessToday();
+let salesChartStyle = 'donut';
 
 const allSales = () => store.get('sales', {});
 function getRec(date) {
@@ -275,7 +276,6 @@ function renderSales(view) {
   // last 7 days
   const chartBox = h('div');
   view.append(h('section', { class: 'card' }, h('h2', {}, 'Last 7 days', h('small', {}, 'tap a day to open it')), chartBox,
-    h('div', { class: 'legend' }, h('span', {}, h('i', { style: 'background:var(--sage)' }), 'Balanced'), h('span', {}, h('i', { style: 'background:var(--amber)' }), 'Over'), h('span', {}, h('i', { style: 'background:var(--ember)' }), 'Short')),
     h('button', { class: 'btn primary', style: 'width:100%;margin-top:16px', onClick: () => {
       const report = sevenDaySalesReport(salesDate);
       printDoc('7-day sales', report.period, report.html);
@@ -287,16 +287,48 @@ function renderSales(view) {
     const data = days.map((k) => ({ k, c: OpsCore.hasSales(all[k]) ? calc(all[k]) : null }));
     const max = Math.max(1, ...data.map((d) => (d.c ? d.c.total : 0)));
     const weekTotal = data.reduce((s, d) => s + (d.c ? d.c.total : 0), 0);
-    chartBox.replaceChildren(
+    const controls = h('div', { class: 'sales-chart-controls', role: 'group', 'aria-label': 'Sales chart style' },
+      ['donut','bars'].map(mode => h('button', { class: 'btn small' + (salesChartStyle === mode ? ' primary' : ''),
+        'aria-pressed': String(salesChartStyle === mode), onClick: () => { salesChartStyle = mode; drawChart(); } }, mode === 'donut' ? 'Donut' : 'Bars')));
+    const period = h('p', { class: 'hint sales-chart-period' }, `${fmtDay(days[0], {day:'numeric',month:'short',year:'numeric'})} – ${fmtDay(salesDate, {day:'numeric',month:'short',year:'numeric'})}`);
+    const recorded = data.filter(d => d.c).length;
+    const completed = data.filter(d => d.c && all[d.k].closingStatus === 'completed').length;
+    const caption = h('p', { class: 'hint' }, `${recorded}/7 days recorded · ${completed}/7 completed. Missing days are excluded; draft amounts are included. Use the date above to view an older period.`);
+    if (salesChartStyle === 'donut') {
+      const colors = ['#244f3c','#57816c','#8eaa9a','#b3bb83','#d3ab62','#b87848','#6c747b'];
+      let angle = 0;
+      const stops = data.filter(d => d.c && d.c.total > 0).map(d => {
+        const from = angle; angle += d.c.total / weekTotal * 360;
+        return `${colors[days.indexOf(d.k)]} ${from}deg ${angle}deg`;
+      });
+      const ring = h('div', { class: 'sales-donut', role: 'img',
+        'aria-label': weekTotal > 0 ? `Recorded sales ${money(weekTotal)} across ${recorded} days. Each slice shows a day's share; amounts are listed below.` : 'No positive recorded sales in this seven-day period',
+        style: `background:${weekTotal > 0 ? 'conic-gradient(' + stops.join(',') + ')' : 'var(--line)'}` },
+        h('div', { class: 'sales-donut-center', 'aria-hidden': 'true' }, h('span', {}, '7-day sales'), h('b', {}, money(weekTotal)), h('small', {}, weekTotal > 0 ? 'share by day' : 'no sales to plot')));
+      const list = h('div', { class: 'sales-donut-key', 'aria-label': 'Daily sales amounts and shares' }, data.map(({k,c},i) => {
+        const share = weekTotal > 0 && c ? (c.total / weekTotal * 100).toFixed(1) + '%' : '—';
+        const state = !c ? 'Not recorded' : all[k].closingStatus === 'completed' ? 'Completed' : 'Draft';
+        return h('button', { class: 'sales-donut-day' + (k === salesDate ? ' selected' : ''),
+          'aria-label': `${fmtLong(k)}: ${c ? money(c.total) + ', ' + share : 'not recorded'}, ${state}. Open day`,
+          onClick: () => { salesDate = k; show('sales'); } },
+          h('i', { style: `background:${colors[i]}`, 'aria-hidden': 'true' }),
+          h('span', { class: 'sales-donut-date' }, h('b', {}, fmtDay(k, {weekday:'short',day:'numeric',month:'short'})), h('small', {}, state)),
+          h('span', { class: 'sales-donut-value' }, h('b', {}, c ? money(c.total) : '—'), h('small', {}, share)));
+      }));
+      chartBox.replaceChildren(controls, period, h('div', { class: 'sales-donut-layout' }, ring, list), caption);
+      return;
+    }
+    chartBox.replaceChildren(controls, period,
       h('div', { class: 'week' }, data.map(({ k, c }) => h('button', {
-        class: 'bar' + (k === salesDate ? ' sel' : ''), 'aria-label': `${fmtLong(k)}: ${c ? money(c.total) : 'no sales'}`,
+        class: 'bar' + (k === salesDate ? ' sel' : ''), 'aria-label': `${fmtLong(k)}: ${c ? money(c.total) : 'not recorded'}`,
         onClick: () => { salesDate = k; show('sales'); },
       },
       h('span', { style: 'font-size:11px;font-family:var(--num)' }, c && c.total ? '£' + Math.round(c.total) : ''),
       h('div', { class: 'fill' + (c && c.total ? ' has' : ''), style: `height:${c ? Math.max(4, (c.total / max) * 100) : 4}px` }),
       h('div', { class: 'dot ' + (c ? c.status : '') }),
       h('div', { class: 'd' }, fmtDay(k, { weekday: 'short' }).slice(0, 2))))),
-      h('div', { class: 'sum-line', style: 'margin-top:10px' }, h('span', {}, '7-day sales'), h('b', {}, money(weekTotal))));
+      h('div', { class: 'legend' }, h('span', {}, h('i', { style: 'background:var(--sage)' }), 'Balanced'), h('span', {}, h('i', { style: 'background:var(--amber)' }), 'Over'), h('span', {}, h('i', { style: 'background:var(--ember)' }), 'Short')),
+      h('div', { class: 'sum-line', style: 'margin-top:10px' }, h('span', {}, '7-day sales'), h('b', {}, money(weekTotal))), caption);
   }
 
   function refresh() {

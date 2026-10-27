@@ -2,6 +2,10 @@
 
 A phone-friendly shop app hosted on GitHub Pages. Works offline after the first online visit. Records stay in the current phone’s browser storage; there is no account, cloud database or automatic sharing between phones.
 
+## Sales donut edition
+
+Daily sales now opens with a seven-day donut showing each date’s share of recorded sales, exact amounts and percentages, with a bar-chart toggle. Navigate the cash-up date to view older periods. Missing days, recorded zero-sales days and Draft/Completed records remain distinct.
+
 ## Shop operations edition
 
 - **Daily sales:** five-step closing routine, Draft/Completed status, discrepancy notes and review checks. Editing a completed day reopens it as Draft. Plain order exports and the seven-day sales PDF remain available.
