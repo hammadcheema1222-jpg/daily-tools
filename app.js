@@ -32,8 +32,8 @@ const store = {
     catch { return fallback; }
   },
   set(key, value) {
-    try { localStorage.setItem('fc.' + key, JSON.stringify(value)); return true; }
-    catch { toast('Could not save – phone storage is full'); return false; }
+    try { localStorage.setItem('fc.' + key, JSON.stringify(value)); window.Ops?.noteSaved(key,true); return true; }
+    catch { window.Ops?.noteSaved(key,false); toast('Could not save – phone storage is full'); return false; }
   },
 };
 
@@ -149,7 +149,7 @@ const SALES_GROUPS = [
 ];
 const DEDUCT = ['jeat', 'uber', 'delivero', 'deliveryDrop', 'pout', 'dojo', 'teya'];
 const DENOMS = [[50, '£50'], [20, '£20'], [10, '£10'], [5, '£5'], [2, '£2'], [1, '£1'], [0.5, '50p'], [0.2, '20p'], [0.1, '10p'], [0.05, '5p'], [0.02, '2p'], [0.01, '1p']];
-let salesDate = today();
+let salesDate = Ops.businessToday();
 
 const allSales = () => store.get('sales', {});
 function getRec(date) {
@@ -160,7 +160,7 @@ function saveRec(date, rec) {
   const all = allSales();
   const hasData = Object.entries(rec).some(([k, v]) => k !== 'float' && k !== 'denoms' && String(v ?? '').trim() !== '');
   if (hasData) all[date] = rec; else delete all[date];
-  store.set('sales', all);
+  return store.set('sales', all);
 }
 function calc(r) {
   const total = num(r.front) + num(r.delivery);
@@ -169,7 +169,7 @@ function calc(r) {
   const counted = String(r.cash ?? '').trim() !== '';
   const takings = num(r.cash) - num(r.float);
   const diff = round2(takings - expected);
-  const status = !counted ? 'none' : Math.abs(diff) < 0.5 ? 'ok' : diff > 0 ? 'over' : 'short';
+  const status = !counted ? 'none' : Math.abs(diff) < 0.005 ? 'ok' : diff > 0 ? 'over' : 'short';
   return { total, ded, expected, counted, takings, diff, status };
 }
 const VERDICT = { none: 'Count the cash to see the difference', ok: 'Balanced', over: 'Over – more cash than expected', short: 'Short – cash is missing' };
@@ -181,7 +181,7 @@ function sevenDaySalesReport(endDate) {
   const rows = days.map((date) => {
     const rec = all[date];
     const label = esc(fmtDay(date, { weekday: 'short', day: 'numeric', month: 'short' }));
-    if (!rec) return `<tr><td>${label}</td><td class="r">Not recorded</td><td class="r">Not recorded</td><td class="r">Not recorded</td></tr>`;
+    if (!OpsCore.hasSales(rec)) return `<tr><td>${label}</td><td class="r">Not recorded</td><td class="r">Not recorded</td><td class="r">Not recorded</td></tr>`;
     recorded++; front += num(rec.front); delivery += num(rec.delivery);
     return `<tr><td>${label}</td><td class="r">${money(num(rec.front))}</td><td class="r">${money(num(rec.delivery))}</td><td class="r">${money(calc(rec).total)}</td></tr>`;
   }).join('');
@@ -205,15 +205,16 @@ function salesText(date, r) {
 
 function renderSales(view) {
   const rec = getRec(salesDate);
-  const save = () => { saveRec(salesDate, rec); refresh(); };
+  const save = () => { Ops.draft(rec); saveRec(salesDate, rec); refresh(); Ops.refreshClosing(); };
   const moneyInput = (key, label) => h('label', { class: 'field' }, h('span', {}, label),
     h('div', { class: 'money' }, h('input', {
       class: 'input', inputmode: 'decimal', placeholder: '0.00', value: rec[key] ?? '', autocomplete: 'off',
-      onInput: (e) => { rec[key] = e.target.value; save(); },
+      onInput: (e) => { if(!Ops.inputAmount(e.target))return; rec[key] = e.target.value; save(); },
     })));
 
   view.append(banner('sales', 'Cash up', 'Enter the till report, count the cash, send it.'));
   view.append(dateNav(salesDate, (d) => { salesDate = d; show('sales'); }));
+  Ops.closing(view,salesDate,rec);
 
   // result card on top: the thing you look at
   const big = h('div', { class: 'big' }); const verdict = h('div', { class: 'verdict' });
@@ -232,7 +233,7 @@ function renderSales(view) {
   // cash count
   rec.denoms = rec.denoms || {};
   const denomTotal = h('b');
-  const cashInput = h('input', { class: 'input', inputmode: 'decimal', placeholder: '0.00', value: rec.cash ?? '', onInput: (e) => { rec.cash = e.target.value; save(); } });
+  const cashInput = h('input', { class: 'input', inputmode: 'decimal', placeholder: '0.00', value: rec.cash ?? '', onInput: (e) => { if(!Ops.inputAmount(e.target))return; rec.cash = e.target.value; save(); } });
   const sumDenoms = () => round2(DENOMS.reduce((s, [v]) => s + v * num(rec.denoms[v]), 0));
   view.append(h('section', { class: 'card' },
     h('h2', {}, 'Cash in the till'),
@@ -240,21 +241,21 @@ function renderSales(view) {
       h('label', { class: 'field' }, h('span', {}, 'Cash counted'), h('div', { class: 'money' }, cashInput)),
       h('label', { class: 'field' }, h('span', {}, 'Float kept in till'), h('div', { class: 'money' }, h('input', {
         class: 'input', inputmode: 'decimal', placeholder: '0.00', value: rec.float ?? '',
-        onInput: (e) => { rec.float = e.target.value; save(); },
+        onInput: (e) => { if(!Ops.inputAmount(e.target))return; rec.float = e.target.value; save(); },
       })))),
     h('p', { class: 'hint' }, 'Float is the change you leave for tomorrow. It gets taken off the counted cash. Leave it empty if you count without the float.'),
     h('details', { class: 'count' },
       h('summary', {}, 'Count notes & coins'),
       h('div', { class: 'denoms' }, DENOMS.map(([v, label]) => h('label', { class: 'field' }, h('span', {}, label),
         h('input', { class: 'input num-input', inputmode: 'numeric', placeholder: '0', value: rec.denoms[v] ?? '',
-          onInput: (e) => { rec.denoms[v] = e.target.value; saveRec(salesDate, rec); denomTotal.textContent = money(sumDenoms()); } })))),
+          onInput: (e) => { if(!Ops.inputAmount(e.target,{integer:true}))return; Ops.draft(rec); rec.denoms[v] = e.target.value; saveRec(salesDate, rec); Ops.refreshClosing(); denomTotal.textContent = money(sumDenoms()); } })))),
       h('div', { class: 'row-between', style: 'padding-bottom:12px' },
         h('div', {}, 'Total ', denomTotal),
         h('button', { class: 'btn small primary', onClick: () => { rec.cash = sumDenoms().toFixed(2); cashInput.value = rec.cash; save(); toast('Cash counted set to ' + money(sumDenoms())); } }, 'Use this total')))));
   denomTotal.textContent = money(sumDenoms());
 
   view.append(h('section', { class: 'card' }, h('h2', {}, 'Note'),
-    h('textarea', { class: 'input', placeholder: 'Why it was short or over, refunds, paid-outs…', onInput: (e) => { rec.note = e.target.value; saveRec(salesDate, rec); } }, rec.note || '')));
+    h('textarea', { class: 'input', placeholder: 'Why it was short or over, refunds, paid-outs…', onInput: (e) => { Ops.draft(rec); rec.note = e.target.value; saveRec(salesDate, rec); Ops.refreshClosing(); } }, rec.note || '')));
 
   view.append(h('div', { class: 'btn-row', style: 'margin-bottom:12px' },
     h('button', { class: 'btn whatsapp', onClick: () => whatsapp(salesText(salesDate, rec)) }, 'Send on WhatsApp'),
@@ -269,7 +270,7 @@ function renderSales(view) {
       if (rec.note) body += `<p><b>Note:</b> ${esc(rec.note)}</p>`;
       printDoc('Daily sales', fmtLong(salesDate), body);
     } }, 'Download PDF'),
-    h('button', { class: 'btn danger', onClick: () => { if (confirm(`Clear everything for ${fmtLong(salesDate)}?`)) { saveRec(salesDate, {}); show('sales'); toast('Day cleared'); } } }, 'Clear day')));
+    h('button', { class: 'btn danger', onClick: () => { if (confirm(`Clear everything for ${fmtLong(salesDate)}? You can undo this in Records.`)) { if(Ops.trashSale(salesDate)){show('sales');toast('Day moved to Recently deleted in Records');} } } }, 'Clear day')));
 
   // last 7 days
   const chartBox = h('div');
@@ -283,7 +284,7 @@ function renderSales(view) {
   function drawChart() {
     const all = allSales(); const days = [];
     for (let i = 6; i >= 0; i--) days.push(addDays(salesDate, -i));
-    const data = days.map((k) => ({ k, c: all[k] ? calc(all[k]) : null }));
+    const data = days.map((k) => ({ k, c: OpsCore.hasSales(all[k]) ? calc(all[k]) : null }));
     const max = Math.max(1, ...data.map((d) => (d.c ? d.c.total : 0)));
     const weekTotal = data.reduce((s, d) => s + (d.c ? d.c.total : 0), 0);
     chartBox.replaceChildren(
@@ -308,6 +309,7 @@ function renderSales(view) {
     drawChart();
   }
   refresh();
+  Ops.weekly(view,salesDate);
 }
 
 /* ================= STOCK LEDGER ================= */
@@ -337,13 +339,16 @@ function renderStock(view, embedded) {
     qty: h('input', { class: 'input num-input', inputmode: 'decimal', placeholder: '1' }),
     price: h('input', { class: 'input', inputmode: 'decimal', placeholder: '0.00' }),
     supplier: h('input', { class: 'input', list: 'supplierlist', placeholder: 'Optional', autocomplete: 'off' }),
+    unit: h('input',{class:'input',placeholder:'e.g. bags, kg, cases'}),
     date: h('input', { class: 'input', type: 'date', value: stockForm.date, onChange: (e) => { stockForm.date = e.target.value; } }),
+    reason: Ops.wasteReasonInput(),
   };
   const lineTotal = h('b', {}, '£0.00');
   const updTotal = () => { lineTotal.textContent = money(num(f.qty.value || 1) * num(f.price.value)); };
   f.qty.addEventListener('input', updTotal); f.price.addEventListener('input', updTotal);
   f.item.addEventListener('change', () => {
     const last = [...ledger].reverse().find((e) => e.item.toLowerCase() === f.item.value.trim().toLowerCase());
+    const known=catalog.find(i=>i.name.toLowerCase()===f.item.value.trim().toLowerCase());if(known){f.unit.value=known.unit||'';if(!f.supplier.value)f.supplier.value=known.supplier||'';}
     if (last) { if (!f.price.value) f.price.value = last.price || ''; if (!f.supplier.value && last.supplier) f.supplier.value = last.supplier; updTotal(); }
   });
   const segBtn = (val, label) => h('button', { type: 'button', 'aria-pressed': String(stockForm.type === val), onClick: () => { stockForm.type = val; show(current); } }, label);
@@ -351,10 +356,11 @@ function renderStock(view, embedded) {
   function add() {
     const item = f.item.value.trim();
     if (!item) { f.item.focus(); toast('Type an item name'); return; }
+    if(!Ops.inputAmount(f.qty,{required:true})||!Ops.inputAmount(f.price,{required:true})){toast('Check quantity and price');return;}
     const qty = num(f.qty.value || 1); const price = num(f.price.value);
     if (qty <= 0) { f.qty.focus(); toast('Quantity must be more than 0'); return; }
     const all = getLedger();
-    all.push({ id: uid(), date: f.date.value || today(), type: stockForm.type, item, qty, price, supplier: f.supplier.value.trim() });
+    all.push({ id: uid(), date: f.date.value || today(), type: stockForm.type, item, qty, price, unit:f.unit.value.trim(), supplier: f.supplier.value.trim(), reason: stockForm.type==='waste'?f.reason.value:'' });
     store.set('ledger', all);
     stockWeek = weekStart(f.date.value || today());
     toast(stockForm.type === 'waste' ? 'Waste logged' : 'Delivery logged');
@@ -369,9 +375,11 @@ function renderStock(view, embedded) {
     h('div', { class: 'fields' },
       h('label', { class: 'field full' }, h('span', {}, 'Item'), f.item),
       h('label', { class: 'field' }, h('span', {}, 'Quantity'), f.qty),
+      h('label', { class: 'field' }, h('span', {}, 'Unit'), f.unit),
       h('label', { class: 'field' }, h('span', {}, 'Price each'), h('div', { class: 'money' }, f.price)),
       h('label', { class: 'field' }, h('span', {}, 'Date'), f.date),
-      h('label', { class: 'field' }, h('span', {}, 'Supplier'), f.supplier)),
+      h('label', { class: 'field' }, h('span', {}, 'Supplier'), f.supplier),
+      stockForm.type==='waste'?h('label',{class:'field full'},h('span',{},'Waste reason'),f.reason):null),
     h('datalist', { id: 'itemlist' }, names.map((n) => h('option', { value: n }))),
     h('datalist', { id: 'supplierlist' }, suppliers.map((n) => h('option', { value: n }))),
     h('div', { class: 'row-between', style: 'margin-top:12px' },
@@ -400,11 +408,11 @@ function renderStock(view, embedded) {
     list.append(h('ul', { class: 'list' }, week.filter((e) => e.date === d).map((e) => h('li', { class: 'li' },
       h('div', { class: 'main' },
         h('div', { class: 'name' }, e.item, e.type === 'waste' && h('span', { class: 'tag' }, 'waste')),
-        h('div', { class: 'meta' }, `${e.qty} × ${money(e.price)}`, e.supplier ? ` · ${e.supplier}` : '')),
+        h('div', { class: 'meta' }, `${e.qty} × ${money(e.price)}`, e.supplier ? ` · ${e.supplier}` : '',e.reason?` · ${e.reason}`:'')),
       h('div', { class: 'amt' }, money(e.qty * e.price)),
       h('button', { class: 'x', 'aria-label': 'Delete ' + e.item, onClick: () => {
         if (!confirm(`Delete ${e.item} (${money(e.qty * e.price)})?`)) return;
-        store.set('ledger', getLedger().filter((x) => x.id !== e.id)); show(current);
+        Ops.trashRecord('ledger',e); show(current);
       } }, '×')))));
   }
   const weekText = () => {
@@ -426,7 +434,7 @@ function renderStock(view, embedded) {
 /* ================= FOOD SPEND (weekly docket) ================= */
 let foodWeek = weekStart(today());
 let itemLogOpen = false;
-const FOOD_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const FOOD_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const getFood = () => store.get('food', {});
 const foodTotal = (arr) => (arr || []).reduce((s, v) => s + num(v), 0);
 const weekLabel = (k) => `Week of ${fmtDay(k, { weekday: 'short', day: 'numeric', month: 'short' })}`;
@@ -439,7 +447,8 @@ function foodText(week, amounts) {
 }
 
 function renderFood(view) {
-  const amounts = (getFood()[foodWeek] || ['', '', '', '', '', '']).slice();
+  const amounts = (getFood()[foodWeek] || ['', '', '', '', '', '', '']).slice();
+  while(amounts.length<7)amounts.push('');
   const save = () => {
     const all = getFood();
     if (amounts.some((v) => String(v).trim() !== '')) all[foodWeek] = amounts; else delete all[foodWeek];
@@ -520,6 +529,7 @@ function renderFood(view) {
     h('div', { class: 'd' }, fmtDay(k, { day: 'numeric', month: 'numeric' }).replace('/', '.'))))));
   }
   upd();
+  Ops.wasteSummary(view,foodWeek);
 }
 
 /* ================= SHIFT LEDGER ================= */
@@ -530,7 +540,7 @@ const toMin = (t) => { const [a, b] = String(t || '0:0').split(':').map(Number);
 function shiftHours(s) {
   if (!s.start || !s.end) return 0;
   let start = toMin(s.start), end = toMin(s.end);
-  if (end <= start) end += 1440; // past midnight
+  if (end < start) end += 1440; // past midnight; identical times are zero, not 24 hours
   return Math.max(0, (end - start - num(s.brk)) / 60);
 }
 let shiftTimer;
@@ -547,6 +557,7 @@ function periodBounds() {
 }
 function updateShift(id, patch) {
   const all = getShifts(); const s = all.find((x) => x.id === id); if (!s) return;
+  const message=OpsCore.shiftError({...s,...patch});if(message){toast(message);show('shifts');return;}
   Object.assign(s, patch); store.set('shifts', all); show('shifts');
 }
 
@@ -581,7 +592,7 @@ function renderShifts(view) {
   function clockOut(p) {
     const o = getOpen(); const since = new Date(o[p.id]); const now = new Date();
     const all = getShifts();
-    all.push({ id: uid(), staffId: p.id, name: p.name, date: dkey(since), start: hhmm(since), end: hhmm(now), brk: 0 });
+    all.push({ id: uid(), staffId: p.id, name: p.name, date: OpsCore.businessDate(since,store.get('settings',{}).cutoff||'04:00'), start: hhmm(since), end: hhmm(now), brk: 0, rate:p.rate??'' });
     delete o[p.id]; store.set('open', o); store.set('shifts', all);
     toast(`${p.name} clocked out \u2013 ${hrs((now - since) / 3600000)}`);
     show('shifts');
@@ -600,12 +611,13 @@ function renderShifts(view) {
       h('label', { class: 'field' }, h('span', {}, 'To'), h('input', { class: 'input', type: 'date', value: customTo, onChange: (e) => { customTo = e.target.value; show('shifts'); } }))) : null,
     h('p', { class: 'hint' }, rangeText)));
 
+  const rateFor = s => s.rate??(staff.find(p=>p.id===s.staffId)||{}).rate;
+  const payFor = s => shiftHours(s)*num(rateFor(s));
   const per = {};
-  for (const s of shifts) { const key = s.staffId || s.name; per[key] = per[key] || { name: s.name, h: 0, n: 0, list: [] }; per[key].h += shiftHours(s); per[key].n++; per[key].list.push(s); }
+  for (const s of shifts) { const key = s.staffId || s.name; per[key] = per[key] || { name: s.name, h: 0, pay:0, n: 0, list: [] }; per[key].h += shiftHours(s); per[key].pay += payFor(s); per[key].n++; per[key].list.push(s); }
   const rows = Object.entries(per).sort((a, b) => b[1].h - a[1].h);
   const totalH = rows.reduce((s, [, v]) => s + v.h, 0);
-  const rateOf = (id) => num((staff.find((p) => p.id === id) || {}).rate);
-  const totalPay = rows.reduce((s, [id, v]) => s + v.h * rateOf(id), 0);
+  const totalPay = rows.reduce((s, [, v]) => s + v.pay, 0);
   const maxH = rows.length ? rows[0][1].h || 1 : 1;
 
   view.append(h('div', { class: 'stats' },
@@ -615,7 +627,7 @@ function renderShifts(view) {
   if (rows.length) view.append(h('section', { class: 'card' }, h('h2', {}, 'Hours by person'),
     h('div', { class: 'hbars' }, rows.map(([id, v]) => h('div', { class: 'hb' },
       h('div', { class: 'hb-top' }, h('span', {}, `${v.name} `, h('span', { class: 'muted' }, `\u00b7 ${v.n} shift${v.n > 1 ? 's' : ''}`)),
-        h('b', {}, hrs(v.h), rateOf(id) ? ` \u00b7 ${money(v.h * rateOf(id))}` : '')),
+        h('b', {}, hrs(v.h), v.list.some(s=>String(rateFor(s)??'').trim()!=='') ? ` \u00b7 ${money(v.pay)}` : '')),
       h('div', { class: 'track' }, h('div', { style: `width:${Math.max(3, (v.h / maxH) * 100)}%` })))))));
 
   // manual add
@@ -637,8 +649,9 @@ function renderShifts(view) {
         h('label', { class: 'field full' }, h('span', {}, 'Break (minutes)'), sf.brk)),
       h('button', { class: 'btn primary', style: 'width:100%;margin-top:12px', onClick: () => {
         const p = staff.find((x) => x.id === sf.who.value); if (!p || !sf.date.value) return;
+        const message=OpsCore.shiftError({start:sf.start.value,end:sf.end.value,brk:sf.brk.value});if(message){Ops.error(sf.end,message);toast(message);return;}
         const all = getShifts();
-        all.push({ id: uid(), staffId: p.id, name: p.name, date: sf.date.value, start: sf.start.value, end: sf.end.value, brk: num(sf.brk.value) });
+        all.push({ id: uid(), staffId: p.id, name: p.name, date: sf.date.value, start: sf.start.value, end: sf.end.value, brk: num(sf.brk.value), rate:p.rate??'' });
         store.set('shifts', all); toast('Shift added'); show('shifts');
       } }, 'Add shift')) : h('p', { class: 'hint' }, 'Add staff first.')));
 
@@ -656,27 +669,27 @@ function renderShifts(view) {
           h('input', { type: 'time', value: s.end || '', 'aria-label': 'Clock out time', onChange: (e) => updateShift(s.id, { end: e.target.value }) })),
         num(s.brk) ? h('div', { class: 'meta' }, `${s.brk} min break`) : null),
       h('div', { style: 'text-align:right' }, h('div', { class: 'amt' }, hrs(shiftHours(s))),
-        rateOf(s.staffId) ? h('div', { class: 'meta' }, money(shiftHours(s) * rateOf(s.staffId))) : null),
+        String(rateFor(s)??'').trim()!=='' ? h('div', { class: 'meta' }, money(payFor(s))) : null),
       h('button', { class: 'x', 'aria-label': 'Delete shift', onClick: () => {
         if (!confirm(`Delete ${s.name}'s shift on ${fmtDay(s.date)}?`)) return;
-        store.set('shifts', getShifts().filter((x) => x.id !== s.id)); show('shifts');
+        Ops.trashRecord('shifts',s); show('shifts');
       } }, '\u00d7')))));
   }
   const periodText = () => {
     const lines = [`${SHOP} \u2013 Shifts`, rangeText, ''];
-    rows.forEach(([id, v]) => lines.push(`${v.name}: ${hrs(v.h)} (${v.n} shifts)${rateOf(id) ? ' \u2013 ' + money(v.h * rateOf(id)) : ''}`));
+    rows.forEach(([id, v]) => lines.push(`${v.name}: ${hrs(v.h)} (${v.n} shifts)${v.list.some(s=>String(rateFor(s)??'').trim()!=='') ? ' \u2013 ' + money(v.pay) : ''}`));
     lines.push('', `Total: ${hrs(totalH)}${totalPay ? ' \u2013 ' + money(totalPay) : ''}`);
     return lines.join('\n');
   };
   const periodPdf = () => {
     let body = '';
     for (const [id, v] of rows) {
-      const rate = rateOf(id);
-      body += `<h3>${esc(v.name)}${rate ? ` \u2013 ${money(rate)}/h` : ''}</h3><table><thead><tr><th>Date</th><th>In</th><th>Out</th><th class="r">Break</th><th class="r">Hours</th>${rate ? '<th class="r">Pay</th>' : ''}</tr></thead><tbody>`;
+      const priced = v.list.some(s=>String(rateFor(s)??'').trim()!=='');
+      body += `<h3>${esc(v.name)}</h3><table><thead><tr><th>Date</th><th>In</th><th>Out</th><th class="r">Break</th><th class="r">Hours</th>${priced ? '<th class="r">Pay</th>' : ''}</tr></thead><tbody>`;
       [...v.list].sort((a, b) => (a.date + a.start < b.date + b.start ? -1 : 1)).forEach((s) => {
-        body += `<tr><td>${esc(fmtDay(s.date, { weekday: 'short', day: 'numeric', month: 'short' }))}</td><td>${esc(s.start)}</td><td>${esc(s.end)}</td><td class="r">${num(s.brk) ? s.brk + 'm' : ''}</td><td class="r">${hrs(shiftHours(s))}</td>${rate ? `<td class="r">${money(shiftHours(s) * rate)}</td>` : ''}</tr>`;
+        body += `<tr><td>${esc(fmtDay(s.date, { weekday: 'short', day: 'numeric', month: 'short' }))}</td><td>${esc(s.start)}</td><td>${esc(s.end)}</td><td class="r">${num(s.brk) ? s.brk + 'm' : ''}</td><td class="r">${hrs(shiftHours(s))}</td>${priced ? `<td class="r">${String(rateFor(s)??'').trim()!==''?money(payFor(s)):'Not priced'}</td>` : ''}</tr>`;
       });
-      body += `</tbody><tfoot><tr><td colspan="4">Total</td><td class="r">${hrs(v.h)}</td>${rate ? `<td class="r">${money(v.h * rate)}</td>` : ''}</tr></tfoot></table>`;
+      body += `</tbody><tfoot><tr><td colspan="4">Total</td><td class="r">${hrs(v.h)}</td>${priced ? `<td class="r">${money(v.pay)}</td>` : ''}</tr></tfoot></table>`;
     }
     body += `<h3>All staff: ${hrs(totalH)}${totalPay ? ' \u2013 ' + money(totalPay) : ''}</h3>`;
     printDoc('Shift ledger', rangeText, body);
@@ -696,6 +709,7 @@ function renderShifts(view) {
       h('div', { class: 'main' }, h('div', { class: 'name' }, p.name), h('div', { class: 'meta' }, p.rate ? `${money(num(p.rate))} an hour` : 'No rate set')),
       h('button', { class: 'x', 'aria-label': 'Remove ' + p.name, onClick: () => {
         if (!confirm(`Remove ${p.name}? Their past shifts stay in the ledger.`)) return;
+        const historical=getShifts().map(s=>s.staffId===p.id&&s.rate==null?{...s,rate:p.rate??''}:s);if(!store.set('shifts',historical))return;
         store.set('staff', getStaff().filter((x) => x.id !== p.id));
         const o = getOpen(); delete o[p.id]; store.set('open', o); show('shifts');
       } }, '\u00d7')))),
@@ -705,6 +719,7 @@ function renderShifts(view) {
     h('p', { class: 'hint' }, 'There is no password, so anyone with this phone can see rates. Leave rate empty to track hours only.'),
     h('button', { class: 'btn primary', style: 'width:100%;margin-top:10px', onClick: () => {
       const name = nm.value.trim(); if (!name) { nm.focus(); return; }
+      if(!Ops.inputAmount(rt)){toast('Check hourly rate');return;}
       const all = getStaff(); all.push({ id: uid(), name, rate: rt.value.trim() }); store.set('staff', all);
       toast(`${name} added`); show('shifts');
     } }, 'Add staff member')));
@@ -712,17 +727,18 @@ function renderShifts(view) {
 
 /* ================= ORDER PAD ================= */
 let orderQuery = '';
+let orderDate = Object.values(store.get('basket',{})).some(q=>num(q)>0)?store.get('basketDate',Ops.businessToday()):Ops.businessToday();
 let editMode = false;
 const getBasket = () => store.get('basket', {});
-const setBasket = (b) => store.set('basket', b);
+const setBasket = (b) => {if(!store.set('basket', b))return false;store.set('basketDate',orderDate);return Ops.saveDraft(orderDate,b);};
 const collapsed = new Set(store.get('collapsed', []));
 
 function orderText(basket) {
-  return [`${SHOP} – Order`, fmtLong(today()), ...orderLines(basket)].join('\n');
+  return [`${SHOP} – Order`, fmtLong(orderDate), ...orderLines(basket)].join('\n');
 }
 
 function orderLines(basket) {
-  return catalog.filter((i) => basket[i.id] > 0).map((i) => `• ${i.name} x ${basket[i.id]}`);
+  return catalog.filter((i) => basket[i.id] > 0).map((i) => `• ${i.name} x ${basket[i.id]}${i.unit?' '+i.unit:''}`);
 }
 
 function renderOrder(view) {
@@ -733,6 +749,9 @@ function renderOrder(view) {
   });
   const orderFig = h('div', { class: 'figure small' });
   view.append(banner('order', 'Order pad', 'Tap what you need. New items stay on the list.', orderFig));
+  view.append(dateNav(orderDate,d=>Ops.switchOrderDate(d)));
+  Ops.reminders(view);
+  Ops.supplierControls(view);
   view.append(
     h('div', { class: 'search' },
       h('div', { class: 'search-wrap' }, h('span', { html: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>' }), search)),
@@ -767,7 +786,7 @@ function renderOrder(view) {
     basketBox.replaceChildren(h('section', { class: 'card basket' },
       h('h2', {}, 'Your order', h('small', {}, `${count} item${count > 1 ? 's' : ''}`)),
       h('ul', { class: 'list' }, lines.map((i) => h('li', { class: 'li' },
-        h('div', { class: 'main' }, h('div', { class: 'name' }, i.name), h('div', { class: 'meta' }, i.section)),
+        h('div', { class: 'main' }, h('div', { class: 'name' }, i.name), h('div', { class: 'meta' }, i.section,i.unit?' · '+i.unit:'',i.supplier?' · '+i.supplier:'')),
         h('div', { class: 'stepper' },
           h('button', { 'aria-label': 'Less', onClick: () => bump(i, -1) }, '−'),
           h('span', { class: 'q' }, b[i.id]),
@@ -778,13 +797,12 @@ function renderOrder(view) {
         h('button', { class: 'btn', onClick: () => copyText(orderText(getBasket())) }, 'Copy'),
         h('button', { class: 'btn', onClick: () => {
           const body = '<ul>' + orderLines(getBasket()).map((line) => `<li>${esc(line.slice(2))}</li>`).join('') + '</ul>';
-          printDoc(`${SHOP} – Order`, fmtLong(today()), body, { plain: true });
+          printDoc(`${SHOP} – Order`, fmtLong(orderDate), body, { plain: true });
         } }, 'Download PDF')),
       h('div', { class: 'btn-row', style: 'margin-top:8px' },
         h('button', { class: 'btn primary', onClick: () => {
-          const bb = getBasket(); const hist = store.get('orderHistory', []);
-          hist.unshift({ date: today(), lines: Object.entries(bb).filter(([, q]) => q > 0) });
-          store.set('orderHistory', hist.slice(0, 20)); setBasket({}); drawBasket(); drawList(); toast('Order saved and cleared');
+          if(!Ops.archiveOrder(orderDate,getBasket()))return;
+          if(!setBasket({})){show('order');toast('Order saved, but draft could not be cleared. Check storage.');return;} show('order'); toast('Order saved in history and cleared');
         } }, 'Order done – clear'),
         h('button', { class: 'btn danger', onClick: () => { if (confirm('Empty the order without saving?')) { setBasket({}); drawBasket(); drawList(); } } }, 'Empty'))));
   }
@@ -809,6 +827,7 @@ function renderOrder(view) {
       const name = nameIn.value.trim(); if (!name) { nameIn.focus(); return; }
       if (catalog.some((i) => i.name.toLowerCase() === name.toLowerCase())) { toast(`${name} is already on the list`); return; }
       const section = secSel.value === '__new' ? newSec.value.trim() || 'Other' : secSel.value;
+      if(!Ops.inputAmount(usual,{required:true})||num(usual.value)<=0){toast('Usual amount must be more than zero');return;}
       const item = { id: 'c' + uid(), section, name, usual: num(usual.value) || 1 };
       // put it at the end of its section so the list stays grouped
       const lastIdx = catalog.map((i) => i.section).lastIndexOf(section);
@@ -837,7 +856,7 @@ function renderOrder(view) {
     const b = getBasket();
     const frag = [];
     for (const sec of sections()) {
-      const items = catalog.filter((i) => i.section === sec && (!q || i.name.toLowerCase().includes(q)));
+      const items = catalog.filter((i) => i.section === sec && Ops.matchesSupplier(i) && (!q || i.name.toLowerCase().includes(q)));
       if (!items.length) continue;
       const isCollapsed = !q && collapsed.has(sec);
       const inOrder = items.filter((i) => b[i.id] > 0).length;
@@ -857,7 +876,7 @@ function renderOrder(view) {
       bump(i, i.usual);
       const row = listBox.querySelector(`[data-id="${i.id}"]`); row?.classList.add('flash');
     } },
-    h('span', { class: 'nm' }, i.name),
+    h('span', { class: 'nm' }, i.name,i.unit?h('small',{class:'item-unit'},i.unit):null),
     h('span', { class: 'plus' }, '+' + i.usual),
     qty ? h('span', { class: 'badge' }, qty) : null);
   }
@@ -866,7 +885,7 @@ function renderOrder(view) {
     const q = h('span', { class: 'q' }, i.usual);
     const set = (v) => { i.usual = Math.max(1, round2(v)); q.textContent = i.usual; saveCatalog(); };
     return h('div', { class: 'item edit' },
-      h('span', { class: 'nm' }, i.name),
+      h('div',{class:'item-edit-main'},h('span', { class: 'nm' }, i.name),Ops.itemEditor(i)),
       h('div', { class: 'stepper' },
         h('button', { 'aria-label': 'Usual amount down', onClick: () => set(i.usual - 1) }, '−'),
         q,
@@ -880,6 +899,7 @@ function renderOrder(view) {
   }
 
   drawBasket(); drawAdd(); drawList();
+  Ops.orderHistory(view);
 }
 
 /* ================= SETTINGS / BACKUP ================= */
@@ -894,18 +914,14 @@ function openSettings() {
   const fileIn = h('input', { type: 'file', accept: 'application/json,.json', style: 'display:none', onChange: async (e) => {
     const file = e.target.files[0]; if (!file) return;
     try {
-      const data = JSON.parse(await file.text());
-      if (!data || data.app !== 'fc-daily' || typeof data.data !== 'object') throw new Error('bad');
-      if (!confirm('Replace everything on this phone with the backup?')) return;
-      Object.keys(localStorage).filter((k) => k.startsWith('fc.')).forEach((k) => localStorage.removeItem(k));
-      for (const [k, v] of Object.entries(data.data)) localStorage.setItem(k, v);
-      location.reload();
-    } catch { toast('That file is not a Favorable Chicken backup'); }
+      await Ops.restoreFile(file);
+    } catch (error) { toast(error.message||'That file is not a Favorable Chicken backup'); }
   } });
 
   body.replaceChildren(
     h('div', { class: 'row-between' }, h('h3', {}, 'Settings'), h('button', { class: 'btn small', onClick: () => dlg.close() }, 'Close')),
     h('p', { class: 'hint' }, 'Everything is saved on this phone only and works with no internet.'),
+    Ops.settingsControls(),
 
     h('h4', {}, 'Usual cash float'),
     h('div', { class: 'money' }, floatIn),
@@ -914,13 +930,7 @@ function openSettings() {
     h('h4', {}, 'Backup'),
     h('p', { class: 'hint', style: 'margin-bottom:8px' }, 'Download a backup each week. Use Restore to move your data to a new phone.'),
     h('div', { class: 'btn-row' },
-      h('button', { class: 'btn primary', onClick: () => {
-        const data = {}; Object.keys(localStorage).filter((k) => k.startsWith('fc.')).forEach((k) => { data[k] = localStorage.getItem(k); });
-        const blob = new Blob([JSON.stringify({ app: 'fc-daily', version: 1, saved: new Date().toISOString(), data }, null, 1)], { type: 'application/json' });
-        const a = h('a', { href: URL.createObjectURL(blob), download: `favorable-chicken-backup-${today()}.json` });
-        document.body.append(a); a.click(); a.remove(); toast('Backup downloaded');
-        const s = store.get('settings', {}); s.lastBackup = today(); store.set('settings', s);
-      } }, 'Download backup'),
+      h('button', { class: 'btn primary', onClick: () => Ops.downloadBackup() }, 'Download backup'),
       h('button', { class: 'btn', onClick: () => fileIn.click() }, 'Restore'), fileIn),
     settings.lastBackup ? h('p', { class: 'hint' }, `Last backup: ${fmtLong(settings.lastBackup)}`) : null,
 
@@ -954,12 +964,14 @@ const ICONS = {
   food: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11h16l-1.5 9h-13z"/><path d="M8 11c0-3 1.5-5 4-6M16 11c0-2-1-4-3-5"/><circle cx="12" cy="4" r="1.5"/></svg>',
   shifts: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
   order: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M9 10h6M9 14h6M9 18h3"/></svg>',
+  records: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4zM8 8h8M8 12h8M8 16h4"/></svg>',
 };
 const TABS = [
   { key: 'sales', label: 'Daily sales', sub: 'Cash up the day', render: renderSales },
   { key: 'food', label: 'Food spend', sub: 'Weekly stock food docket', render: renderFood },
   { key: 'shifts', label: 'Shifts', sub: 'Clock in, hours ledger', render: renderShifts },
   { key: 'order', label: 'Order pad', sub: 'Build the supplier order', render: renderOrder },
+  { key: 'records', label: 'Records', sub: 'Search, restore and export', render: Ops.renderRecords },
 ];
 let current = store.get('tab', 'sales');
 if (current === 'stock') current = 'food';
@@ -980,9 +992,11 @@ function show(key) {
   if (key !== 'shifts') clearInterval(shiftTimer);
   if (key !== 'order') $('#orderPill')?.remove();
   const view = $('#view'); const y = window.scrollY;
-  view.replaceChildren(); t.render(view);
+  view.replaceChildren(); if(key!=='order')Ops.reminders(view); t.render(view);
   window.scrollTo(0, changed ? 0 : y);
 }
+Ops.mountStatus();
+if(Object.values(getBasket()).some(q=>num(q)>0))Ops.saveDraft(orderDate,getBasket());
 show(current);
 
 /* ================= offline ================= */

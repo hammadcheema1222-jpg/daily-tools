@@ -1,35 +1,29 @@
-# Favorable Chicken – Daily tools
+# Favorable Chicken — Daily tools
 
-A simple phone app for the shop. No password, no server, works offline.
+A phone-friendly shop app hosted on GitHub Pages. Works offline after the first online visit. Records stay in the current phone’s browser storage; there is no account, cloud database or automatic sharing between phones.
 
-## Design & PDF edition
+## Shop operations edition
 
-Original chicken emblem and four matching vector illustrations; ivory, forest and brass palette; clearer typography, touch targets and keyboard focus states.
+- **Daily sales:** five-step closing routine, Draft/Completed status, discrepancy notes and review checks. Editing a completed day reopens it as Draft. Plain order exports and the seven-day sales PDF remain available.
+- **Trading day:** configurable cutoff in Settings, default 04:00. A new cash-up at 01:00 starts on the previous trading date. Existing dates are never automatically moved.
+- **Weekly partner report:** sales, food docket, separately logged deliveries, recorded wages, waste and cash differences in one branded PDF. Missing entries and unpriced shifts are flagged. Docket and delivery logs are separate views, not additive; this report is not a profit calculation or full payroll.
+- **Sales trends:** comparable elapsed weekdays and previous matching weekdays. Percentage comparisons require completed records on both sides.
+- **Food spend:** seven days, Monday–Sunday; itemised deliveries with quantities/units and waste with reasons and weekly cause totals.
+- **Shifts:** overnight shifts, validated breaks, and recorded hourly rates retained with new shifts. Legacy shifts using a current rate are identified in the weekly report.
+- **Order pad:** dated drafts and saved orders, supplier filters, units, supplier-specific copy/WhatsApp/PDF, and weekly quantity comparisons. Increased ordering is not proof of increased consumption. Use **Order done — clear** to archive a finished order. Existing history is retained without the former 20-order cap; records previously discarded cannot be reconstructed.
+- **Edit list:** change an existing item’s name, unit or supplier while retaining its ID. Saved orders keep their original names and units.
+- **Recurring stock reminders:** configurable needed weekday and advance notice. Veggie Oil defaults to Monday with a Sunday reminder where that item exists. Reminders appear inside the app, not as background push notifications.
+- **Records:** search sales days, food entries, deliveries, waste, shifts and saved/draft orders; filter dates/type, open records and export filtered records to CSV. Recently deleted sales, shifts and ledger entries can be restored.
+- **Save and backup status:** visible device-save status, last backup download and a seven-day reminder. Backups include new data. Restore validates supported backup structure and downloads a recovery copy before replacing app data. Keep downloaded backup files somewhere safe; downloading cannot prove they remain available.
 
-**Download PDF** now generates a branded A4 report directly on the device for cash-up, food spend, shifts and supplier orders. Reports have aligned amounts, highlighted totals, repeated table headers and page numbers. No report data is sent to a server. The bundled `pdf-lib.min.js` is MIT licensed (see `pdf-lib-LICENSE.md`). If a staff name contains characters unsupported by the built-in PDF fonts, the matching browser print layout opens instead; choose Save as PDF.
+## Using it
 
-Your existing `fc.*` browser records and backup format are unchanged. Online assets are refreshed; the saved shell is still used offline. After deploying, open online and reopen the app to pick up the new cache.
+Open https://hammadcheema1222-jpg.github.io/daily-tools/ online and add it to your home screen. After an update, reopen online to receive the refreshed app shell. Your existing `fc.*` records are retained. Changing the website does not transfer records to another phone: download a backup and restore it on the other device. Restoring replaces that device’s app records; it does not merge two phones.
 
-| Tab | What it does |
-|---|---|
-| **Daily sales** | Cash-up: Front + Delivery, minus Just Eat / Uber / Deliveroo / Delivery Drop / P.out / Dojo / Teya = expected cash. Count the till (or count notes & coins), take off the float, and see if you're balanced, over or short. Last-7-days chart. Send to WhatsApp or get a PDF. |
-| **Food spend** | Weekly stock food docket: one amount per day Mon–Sat, week total, compare with last week, last-8-weeks chart, PDF. Optional item log for deliveries and waste. |
-| **Shifts** | Clock staff in and out, add shifts by hand (works past midnight), tap a time to correct it. Pay periods: this week, last 2 weeks, this month or custom. Hours and pay per person, PDF timesheet. |
-| **Order pad** | Tap items to build the supplier order. Type an item that isn't there to add it – it stays on the list. *Edit list* to remove items you don't order any more or change the usual amount. Repeat last order. Send to WhatsApp. |
+## Implementation and checks
 
-## Important: where data is saved
-Everything is saved **on the phone you use it on** (browser storage). Two phones won't share data.
-Use **Settings (gear) › Download backup** every week, and **Restore** to move to a new phone.
+`app.js` contains the existing shop screens; `operations.js` adds workflow/search/reminders; `ops-core.js` contains pure calculations and backup validation. `reports.js` and bundled MIT-licensed `pdf-lib.min.js` generate PDFs on the device. The existing emblem and visual palette are preserved.
 
-## Put it online (GitHub Pages – free)
-1. Repo › **Settings › Pages** › Source: *Deploy from a branch* › Branch: `main` / `(root)` › Save.
-2. After a minute the app is live at https://hammadcheema1222-jpg.github.io/daily-tools/.
-3. Open that link on the shop phone once with internet, then *Add to Home Screen*. After that it works offline.
+Validation covered 14 domain regression checks (cutoff boundaries, amounts, overnight shifts, comparable periods, reports, preserved history, units, recurring reminders, CSV escaping and backup recovery), existing export/pagination checks, closing/renaming/search browser flows, a 390px mobile layout check and rendered weekly PDF inspection.
 
-## Making changes
-Edit files straight on GitHub – GitHub Pages updates in about a minute.
-- Shop item list: `DEFAULT_ITEMS` near the top of `app.js` (only used on first open / reset; normally just use *Edit list* in the app).
-- Sales fields: `SALES_GROUPS` in `app.js`.
-- Colours: top of `styles.css`. Illustrations: `art.js`.
-- **After any change, bump `VERSION` in `sw.js`** (e.g. `fc-daily-v3`) so phones pick up the update.
-
+Host the repository root on GitHub Pages from `main`. Bump `VERSION` in `sw.js` when changing the app shell. No private shop records belong in this public repository.
